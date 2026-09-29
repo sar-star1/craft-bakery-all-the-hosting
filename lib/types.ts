@@ -9,6 +9,24 @@ export type OrderStatus =
   | "completed";
 export type DepositStatus = "paid" | "pending" | "n/a";
 
+export interface OrderLine {
+  name: string;
+  category: string;
+  qty: number;
+  unit_price: number;
+  subtotal: number;
+}
+
+// Free-form for manual entries ({ notes }); website orders also carry the
+// itemised cart and delivery/contact details here.
+export interface OrderDetails {
+  notes?: string;
+  items?: OrderLine[];
+  address?: string;
+  email?: string;
+  phone?: string;
+}
+
 export interface Order {
   id: string;
   client_id: string | null;
@@ -18,8 +36,8 @@ export interface Order {
   customer_contact: string | null;
   item_summary_uk: string;
   item_summary_en: string | null;
-  item_details_uk: { notes?: string } | null;
-  item_details_en: { notes?: string } | null;
+  item_details_uk: OrderDetails | null;
+  item_details_en: OrderDetails | null;
   status: OrderStatus;
   deposit_status: DepositStatus;
   total_amount: number | null;
@@ -120,14 +138,32 @@ export interface PendingReply {
   created_at: string;
 }
 
+export interface MenuCategory {
+  id: string;
+  name_uk: string;
+  name_en: string | null;
+  min_order: number;
+  note_uk: string | null;
+  note_en: string | null;
+  sort_order: number;
+  created_at: string;
+}
+
 export interface MenuItem {
   id: string;
-  category: OrderCategory;
+  category_id: string;
   name_uk: string;
   name_en: string | null;
   description_uk: string | null;
   description_en: string | null;
   price: number;
+  original_price: number | null;
+  promo_label: string | null;
+  weight: string | null;
+  storage_note: string | null;
+  badge: string | null;
+  freezable: boolean;
+  min_order_override: number | null;
   photo_url: string | null;
   is_active: boolean;
   sort_order: number;
@@ -139,7 +175,19 @@ export interface SiteContent {
   key: string;
   content_uk: string | null;
   content_en: string | null;
+  content_json: unknown;
   updated_at: string;
+}
+
+export interface DeliveryTermsBlock {
+  heading: string;
+  lines: string[];
+}
+
+export interface PromoBannerContent {
+  active: boolean;
+  title: string;
+  subtitle: string;
 }
 
 export interface CapacityRule {
@@ -147,4 +195,14 @@ export interface CapacityRule {
   rule_type: string;
   value: string;
   notes: string | null;
+}
+
+export interface Message {
+  id: string;
+  client_id: string | null;
+  conversation_id: string | null;
+  direction: "in" | "out";
+  text: string;
+  telegram_message_id: number | null;
+  created_at: string;
 }

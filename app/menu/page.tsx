@@ -1,17 +1,25 @@
 import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase/server";
-import type { MenuItem, SiteContent } from "@/lib/types";
-import { mockMenuItems, mockSiteContent } from "@/lib/mockMenu";
+import type { MenuCategory, MenuItem, SiteContent } from "@/lib/types";
+import { mockMenuCategories, mockMenuItems, mockSiteContent } from "@/lib/mockMenu";
 import MenuManager from "@/components/MenuManager";
 
 export const dynamic = "force-dynamic";
 
 export default async function MenuPage() {
   if (!isSupabaseConfigured()) {
-    return <MenuManager menuItems={mockMenuItems} siteContent={mockSiteContent} sampleMode />;
+    return (
+      <MenuManager
+        categories={mockMenuCategories}
+        menuItems={mockMenuItems}
+        siteContent={mockSiteContent}
+        sampleMode
+      />
+    );
   }
 
   const supabase = createSupabaseServerClient();
-  const [{ data: menuItems, error }, { data: siteContent }] = await Promise.all([
+  const [{ data: categories, error }, { data: menuItems }, { data: siteContent }] = await Promise.all([
+    supabase.from("menu_categories").select("*").order("sort_order", { ascending: true }),
     supabase.from("menu_items").select("*").order("sort_order", { ascending: true }),
     supabase.from("site_content").select("*"),
   ]);
@@ -27,10 +35,18 @@ export default async function MenuPage() {
     );
   }
 
+  // The terms/notes editor only manages plain-text blocks — structured
+  // entries (delivery_terms, promo_banner) live in content_json and are
+  // seeded via SQL for now rather than edited here.
+  const textContent = ((siteContent ?? []) as SiteContent[]).filter(
+    (c) => c.content_uk !== null || c.content_en !== null
+  );
+
   return (
     <MenuManager
+      categories={(categories ?? []) as MenuCategory[]}
       menuItems={(menuItems ?? []) as MenuItem[]}
-      siteContent={(siteContent ?? []) as SiteContent[]}
+      siteContent={textContent}
     />
   );
 }

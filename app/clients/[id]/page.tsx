@@ -1,7 +1,8 @@
 import { notFound } from "next/navigation";
 import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase/server";
-import type { Client, Conversation, Order, PendingReply } from "@/lib/types";
-import { mockClients, mockConversations, mockPendingReplies } from "@/lib/mockClients";
+import type { Client, Conversation, Message, Order, PendingReply } from "@/lib/types";
+import { getStorefrontLink } from "@/lib/clientToken";
+import { mockClients, mockConversations, mockMessages, mockPendingReplies } from "@/lib/mockClients";
 import { mockOrders } from "@/lib/mockOrders";
 import ClientDetail from "@/components/ClientDetail";
 
@@ -25,6 +26,8 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
         conversation={conversation}
         pendingReplies={pendingReplies}
         orders={orders}
+        messages={mockMessages.filter((m) => m.client_id === id)}
+        orderLink={`https://your-site.example/order?ref=${id}`}
         sampleMode
       />
     );
@@ -32,7 +35,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
 
   const supabase = createSupabaseServerClient();
 
-  const [{ data: client, error: clientError }, { data: conversations }, { data: orders }] =
+  const [{ data: client, error: clientError }, { data: conversations }, { data: orders }, { data: messages }] =
     await Promise.all([
       supabase.from("clients").select("*").eq("id", id).single(),
       supabase
@@ -46,6 +49,12 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
         .select("*")
         .eq("client_id", id)
         .order("created_at", { ascending: false }),
+      supabase
+        .from("messages")
+        .select("*")
+        .eq("client_id", id)
+        .order("created_at", { ascending: true })
+        .limit(100),
     ]);
 
   if (clientError || !client) notFound();
@@ -67,6 +76,8 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       conversation={conversation}
       pendingReplies={pendingReplies}
       orders={(orders ?? []) as Order[]}
+      messages={(messages ?? []) as Message[]}
+      orderLink={getStorefrontLink(id)}
     />
   );
 }

@@ -7,7 +7,7 @@ export function isTelegramConfigured() {
 export async function sendTelegramMessage(
   chatId: string,
   text: string
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; messageId?: number }> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) {
     return { ok: false, error: "TELEGRAM_BOT_TOKEN is not configured. Add it to .env.local." };
@@ -16,13 +16,25 @@ export async function sendTelegramMessage(
   const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text }),
+    // Telegram caps a message at 4096 characters.
+    body: JSON.stringify({ chat_id: chatId, text: text.slice(0, 4096) }),
   });
   const json = await res.json();
   if (!json.ok) {
     return { ok: false, error: json.description ?? "Telegram API error" };
   }
-  return { ok: true };
+  return { ok: true, messageId: json.result?.message_id };
+}
+
+// Best-effort "typing…" indicator while the agent thinks.
+export async function sendTypingAction(chatId: string): Promise<void> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return;
+  await fetch(`https://api.telegram.org/bot${token}/sendChatAction`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, action: "typing" }),
+  }).catch(() => {});
 }
 
 // Admin notifications (new orders, mass-order flags, new drafts) go to this

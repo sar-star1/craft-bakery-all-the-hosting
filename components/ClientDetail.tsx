@@ -13,7 +13,7 @@ import {
   PIPELINE_STAGE_KEY,
   STR,
 } from "@/lib/i18n";
-import { PIPELINE_STAGES, type Client, type Conversation, type Order, type PendingReply } from "@/lib/types";
+import { PIPELINE_STAGES, type Client, type Conversation, type Message, type Order, type PendingReply } from "@/lib/types";
 import { formatDateTime, formatMoney } from "@/lib/utils";
 import Sidebar from "./Sidebar";
 import LangToggle from "./LangToggle";
@@ -24,12 +24,16 @@ export default function ClientDetail({
   conversation,
   pendingReplies,
   orders,
+  messages,
+  orderLink,
   sampleMode = false,
 }: {
   client: Client;
   conversation: Conversation | null;
   pendingReplies: PendingReply[];
   orders: Order[];
+  messages: Message[];
+  orderLink: string | null;
   sampleMode?: boolean;
 }) {
   const [lang, setLang] = useState<Lang>("uk");
@@ -114,6 +118,37 @@ export default function ClientDetail({
             <p className="text-stone-700 text-sm">{client.standing_order_notes}</p>
           </div>
         )}
+
+        {orderLink && (
+          <div className="bg-white rounded-md border border-stone-200 p-4 mb-6">
+            <p className="text-stone-400 text-[11px] uppercase tracking-wide mb-1">{t.clientOrderLink}</p>
+            <code className="text-[12px] text-stone-700 break-all">{orderLink}</code>
+          </div>
+        )}
+
+        <section className="mb-8">
+          <h2 className="font-serif text-lg mb-3">{t.clientMessages}</h2>
+          {messages.length === 0 ? (
+            <p className="text-stone-400 text-sm">{t.clientNoMessages}</p>
+          ) : (
+            <div className="bg-white rounded-md border border-stone-200 p-4 space-y-2 max-h-96 overflow-y-auto">
+              {messages.map((m) => (
+                <div key={m.id} className={`flex ${m.direction === "out" ? "justify-end" : "justify-start"}`}>
+                  <div
+                    className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${
+                      m.direction === "out" ? "bg-stone-900 text-white" : "bg-stone-100 text-stone-800"
+                    }`}
+                  >
+                    <p className="whitespace-pre-wrap">{m.text}</p>
+                    <p className={`text-[10px] mt-1 ${m.direction === "out" ? "text-stone-400" : "text-stone-400"}`}>
+                      {m.direction === "out" ? t.msgFromUs : t.msgFromClient} · {formatDateTime(m.created_at, lang)}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
 
         <section className="mb-8">
           <h2 className="font-serif text-lg mb-3">{t.clientConversation}</h2>

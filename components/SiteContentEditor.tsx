@@ -112,7 +112,10 @@ export default function SiteContentEditor({
 
       <button
         onClick={() =>
-          setBlocks((prev) => [...prev, { key: "", content_uk: "", content_en: "", updated_at: new Date().toISOString() }])
+          setBlocks((prev) => [
+            ...prev,
+            { key: "", content_uk: "", content_en: "", content_json: null, updated_at: new Date().toISOString() },
+          ])
         }
         className="text-[13px] text-stone-500 hover:text-stone-900"
       >

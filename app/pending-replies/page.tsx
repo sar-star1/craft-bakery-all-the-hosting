@@ -4,6 +4,8 @@ import { mockClients, mockPendingReplies } from "@/lib/mockClients";
 import PendingRepliesList, { type PendingReplyWithClientName } from "@/components/PendingRepliesList";
 
 export const dynamic = "force-dynamic";
+// The seasonal-offer action drafts messages in the background via after().
+export const maxDuration = 300;
 
 export default async function PendingRepliesPage() {
   if (!isSupabaseConfigured()) {

@@ -7,6 +7,7 @@ import type { PendingReply } from "@/lib/types";
 import Sidebar from "./Sidebar";
 import LangToggle from "./LangToggle";
 import PendingReplyCard from "./PendingReplyCard";
+import SeasonalOfferForm from "./SeasonalOfferForm";
 
 export interface PendingReplyWithClientName extends PendingReply {
   clientName: string;
@@ -42,6 +43,8 @@ export default function PendingRepliesList({
 
         <h1 className="font-serif text-2xl">{t.pendingRepliesTitle}</h1>
         <p className="text-stone-500 text-sm mt-0.5 mb-6">{t.pendingRepliesSubtitle}</p>
+
+        <SeasonalOfferForm lang={lang} sampleMode={sampleMode} />
 
         {awaiting.length === 0 ? (
           <p className="text-stone-400 text-sm">{t.pendingRepliesEmpty}</p>

@@ -1,0 +1,58 @@
+/* Theme for the public ordering storefront, ported from the Lovable site.
+   Everything is scoped to `.storefront` (applied to both the page wrapper
+   and <body> while the storefront is mounted, so Radix portals — dialogs,
+   sheets, toasts — inherit it too). Never leaks into the admin dashboard. */
+
+.storefront {
+  --background: 0 0% 100%;
+  --foreground: 0 0% 4%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 4%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 4%;
+  --primary: 0 0% 4%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 0 0% 96%;
+  --secondary-foreground: 0 0% 4%;
+  --muted: 0 0% 96%;
+  --muted-foreground: 0 0% 40%;
+  --accent: 210 40% 90%;
+  --accent-foreground: 0 0% 4%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 0 0% 90%;
+  --input: 0 0% 90%;
+  --ring: 0 0% 4%;
+
+  font-family: "Work Sans Variable", "Work Sans", system-ui, sans-serif;
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+.storefront * {
+  border-color: hsl(var(--border));
+}
+
+.storefront h1,
+.storefront h2,
+.storefront h3,
+.storefront h4 {
+  font-family: "Instrument Serif", Georgia, serif;
+  letter-spacing: -0.025em;
+}
+
+.storefront .font-display-black {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+}
+
+/* The original design is square-cornered (--radius: 0). */
+.storefront .rounded,
+.storefront .rounded-sm,
+.storefront .rounded-md,
+.storefront .rounded-lg {
+  border-radius: 0;
+}

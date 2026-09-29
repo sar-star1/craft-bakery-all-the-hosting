@@ -1,7 +1,7 @@
 // Sample clients/conversations/drafts for testing the Clients and Pending
 // Replies views before Supabase and the Telegram bot are wired up. Shapes
 // match the real tables exactly (see supabase/schema.sql).
-import type { Client, Conversation, PendingReply } from "./types";
+import type { Client, Conversation, Message, PendingReply } from "./types";
 
 export const mockClients: Client[] = [
   {
@@ -125,5 +125,26 @@ export const mockPendingReplies: PendingReply[] = [
     reply_type: "weekly_reminder",
     status: "approved_sent",
     created_at: "2026-09-14T07:00:00Z",
+  },
+];
+
+export const mockMessages: Message[] = [
+  {
+    id: "msg_1",
+    client_id: "client_1",
+    conversation_id: "conv_1",
+    direction: "out",
+    text: "Доброго ранку! Нагадуємо про ваше звичне замовлення на цей тиждень — оформити?",
+    telegram_message_id: 101,
+    created_at: "2026-09-16T08:00:00Z",
+  },
+  {
+    id: "msg_2",
+    client_id: "client_1",
+    conversation_id: "conv_1",
+    direction: "in",
+    text: "Доброго дня! Можна з наступного тижня замовляти на 50 круасанів більше?",
+    telegram_message_id: 102,
+    created_at: "2026-09-17T09:00:00Z",
   },
 ];

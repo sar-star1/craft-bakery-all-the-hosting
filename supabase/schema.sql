@@ -57,28 +57,57 @@ create table orders (
 -- agent reads for pricing questions in chat — one unified project, so the
 -- management screen, the live storefront, and the agent all see the same
 -- row the instant it's edited. Replaces the earlier flat `pricing` table.
-create table menu_items (
+--
+-- Shaped to match the real catalog (imported from the existing site's
+-- hardcoded menuData.ts, ~90 items across 15 categories): each category
+-- carries its own minimum-order quantity and note, each item can override
+-- that minimum, and promo pricing (crossed-out original price + label) is
+-- a first-class pair of columns rather than a side-table of overrides —
+-- there's now exactly one place a price lives, not a base value plus a
+-- separate overrides table like the old site had.
+create table menu_categories (
   id uuid primary key default gen_random_uuid(),
-  category text not null check (category in ('b2c', 'b2b', 'standard_line')) default 'b2b',
   name_uk text not null,
   name_en text,
-  description_uk text,          -- ingredients, allergens, portion notes, etc.
+  min_order integer not null default 1,   -- min combined qty across this category's items
+  note_uk text,                            -- e.g. shelf-life, shown under the category title
+  note_en text,
+  sort_order integer not null default 0,
+  created_at timestamptz default now()
+);
+
+create table menu_items (
+  id uuid primary key default gen_random_uuid(),
+  category_id uuid references menu_categories(id) not null,
+  name_uk text not null,
+  name_en text,
+  description_uk text,          -- ingredients, allergens, composition
   description_en text,
-  price numeric not null,
-  photo_url text,                -- public URL in the `menu-photos` storage bucket
-  is_active boolean not null default true,   -- hide without deleting
+  price numeric not null,                 -- current price, UAH
+  original_price numeric,                 -- shown crossed-out when on promo
+  promo_label text,                       -- e.g. "-15%" or "Товар тижня"
+  weight text,                             -- free text: units differ ("190 г", "1,7 кг")
+  storage_note text,                       -- shelf-life / storage instructions
+  badge text,                              -- highlight badge shown on the card
+  freezable boolean not null default false,
+  min_order_override integer,             -- overrides the category's min_order for this item
+  photo_url text,                         -- public URL, either in `menu-photos` or hotlinked
+  is_active boolean not null default true, -- hide without deleting
   sort_order integer not null default 0,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
 
--- Freeform site copy that isn't tied to one menu item — terms & conditions,
--- allergen disclaimers, delivery policy, etc. `key` is a short slug the
--- storefront looks up by (e.g. 'terms', 'allergen_notice').
+-- Freeform site copy that isn't tied to one menu item — delivery terms, the
+-- promo banner, allergen disclaimers, etc. `key` is a short slug the
+-- storefront looks up by. content_uk/content_en are for simple text; use
+-- content_json for structured content (e.g. delivery_terms' list of
+-- heading+lines blocks, or promo_banner's {active, title, subtitle}).
 create table site_content (
   key text primary key,
   content_uk text,
   content_en text,
+  content_json jsonb,
   updated_at timestamptz default now()
 );
 
@@ -118,6 +147,20 @@ create table pending_replies (
   created_at timestamptz default now()
 );
 
+-- Conversation log. Not in the original spec, but the agent is stateless
+-- (Claude sees only what we send it), so every incoming/outgoing Telegram
+-- message is stored here and replayed as history. Also what the client
+-- detail page shows as the "conversation".
+create table messages (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid references clients(id),
+  conversation_id uuid references conversations(id),
+  direction text not null check (direction in ('in', 'out')),
+  text text not null,
+  telegram_message_id bigint,
+  created_at timestamptz default now()
+);
+
 create index orders_status_idx on orders(status);
 create index orders_category_idx on orders(category);
 create index clients_status_idx on clients(status);
@@ -125,7 +168,11 @@ create index clients_pipeline_stage_idx on clients(pipeline_stage);
 create index conversations_client_idx on conversations(client_id);
 create index mass_order_flags_resolved_idx on mass_order_flags(resolved);
 create index pending_replies_status_idx on pending_replies(status);
-create index menu_items_category_idx on menu_items(category);
+create index messages_client_idx on messages(client_id, created_at desc);
+-- Telegram can redeliver an update; this makes replays a no-op.
+create unique index messages_incoming_dedupe_idx
+  on messages(client_id, telegram_message_id) where direction = 'in' and telegram_message_id is not null;
+create index menu_items_category_idx on menu_items(category_id);
 
 -- The dashboard and agent only ever talk to these tables through the
 -- service-role key on the server (see lib/supabase/server.ts), which
@@ -137,11 +184,13 @@ create index menu_items_category_idx on menu_items(category);
 alter table clients enable row level security;
 alter table conversations enable row level security;
 alter table orders enable row level security;
+alter table menu_categories enable row level security;
 alter table menu_items enable row level security;
 alter table site_content enable row level security;
 alter table capacity_rules enable row level security;
 alter table mass_order_flags enable row level security;
 alter table pending_replies enable row level security;
+alter table messages enable row level security;
 
 -- Public bucket for menu photos — served directly by Supabase's CDN, no
 -- signed URLs needed since these are just product photos, not sensitive.
