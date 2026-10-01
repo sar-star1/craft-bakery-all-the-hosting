@@ -1,6 +1,8 @@
 "use server";
 
+import { after } from "next/server";
 import { revalidatePath } from "next/cache";
+import { createSeasonalOfferDrafts, type OfferSegment } from "@/lib/jobs";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getBotDeepLink, sendTelegramMessage } from "@/lib/telegram";
 import {
@@ -91,7 +93,7 @@ export async function approvePendingReply(id: string): Promise<PendingReplyActio
 
   const { data: reply, error: fetchError } = await supabase
     .from("pending_replies")
-    .select("id, draft_text, client_id")
+    .select("id, draft_text, client_id, conversation_id")
     .eq("id", id)
     .single();
 
@@ -120,6 +122,14 @@ export async function approvePendingReply(id: string): Promise<PendingReplyActio
     .eq("id", id);
 
   if (updateError) return { error: updateError.message };
+
+  await supabase.from("messages").insert({
+    client_id: reply.client_id,
+    conversation_id: reply.conversation_id,
+    direction: "out",
+    text: reply.draft_text,
+    telegram_message_id: sendResult.messageId ?? null,
+  });
 
   revalidatePath("/clients");
   revalidatePath("/pending-replies");
@@ -201,18 +211,25 @@ export async function saveMenuItem(
   formData: FormData
 ): Promise<SaveMenuItemState> {
   const id = String(formData.get("id") ?? "").trim() || null;
-  const category = String(formData.get("category") ?? "b2b") as OrderCategory;
+  const categoryId = String(formData.get("category_id") ?? "").trim();
   const nameUk = String(formData.get("name_uk") ?? "").trim();
   const nameEn = String(formData.get("name_en") ?? "").trim();
   const descriptionUk = String(formData.get("description_uk") ?? "").trim();
   const descriptionEn = String(formData.get("description_en") ?? "").trim();
   const priceRaw = String(formData.get("price") ?? "").trim();
+  const originalPriceRaw = String(formData.get("original_price") ?? "").trim();
+  const promoLabel = String(formData.get("promo_label") ?? "").trim();
+  const weight = String(formData.get("weight") ?? "").trim();
+  const storageNote = String(formData.get("storage_note") ?? "").trim();
+  const badge = String(formData.get("badge") ?? "").trim();
+  const freezable = formData.get("freezable") === "on";
+  const minOrderOverrideRaw = String(formData.get("min_order_override") ?? "").trim();
   const isActive = formData.get("is_active") === "on";
   const photoFile = formData.get("photo") as File | null;
   const existingPhotoUrl = String(formData.get("existing_photo_url") ?? "").trim() || null;
 
   const price = Number(priceRaw);
-  if (!nameUk || !priceRaw || Number.isNaN(price)) {
+  if (!nameUk || !categoryId || !priceRaw || Number.isNaN(price)) {
     return { error: "formError" };
   }
 
@@ -230,12 +247,19 @@ export async function saveMenuItem(
   }
 
   const record = {
-    category,
+    category_id: categoryId,
     name_uk: nameUk,
     name_en: nameEn || null,
     description_uk: descriptionUk || null,
     description_en: descriptionEn || null,
     price,
+    original_price: originalPriceRaw ? Number(originalPriceRaw) : null,
+    promo_label: promoLabel || null,
+    weight: weight || null,
+    storage_note: storageNote || null,
+    badge: badge || null,
+    freezable,
+    min_order_override: minOrderOverrideRaw ? Number(minOrderOverrideRaw) : null,
     photo_url: photoUrl,
     is_active: isActive,
   };
@@ -253,6 +277,52 @@ export async function saveMenuItem(
 export async function deleteMenuItem(id: string) {
   const supabase = createSupabaseServerClient();
   const { error } = await supabase.from("menu_items").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+  revalidatePath("/menu");
+}
+
+export interface SaveMenuCategoryState {
+  error?: string;
+}
+
+export async function saveMenuCategory(
+  _prevState: SaveMenuCategoryState,
+  formData: FormData
+): Promise<SaveMenuCategoryState> {
+  const id = String(formData.get("id") ?? "").trim() || null;
+  const nameUk = String(formData.get("name_uk") ?? "").trim();
+  const nameEn = String(formData.get("name_en") ?? "").trim();
+  const minOrderRaw = String(formData.get("min_order") ?? "").trim();
+  const noteUk = String(formData.get("note_uk") ?? "").trim();
+  const noteEn = String(formData.get("note_en") ?? "").trim();
+
+  const minOrder = Number(minOrderRaw);
+  if (!nameUk || !minOrderRaw || Number.isNaN(minOrder)) {
+    return { error: "formError" };
+  }
+
+  const supabase = createSupabaseServerClient();
+  const record = {
+    name_uk: nameUk,
+    name_en: nameEn || null,
+    min_order: minOrder,
+    note_uk: noteUk || null,
+    note_en: noteEn || null,
+  };
+
+  const { error } = id
+    ? await supabase.from("menu_categories").update(record).eq("id", id)
+    : await supabase.from("menu_categories").insert(record);
+
+  if (error) return { error: error.message };
+
+  revalidatePath("/menu");
+  return {};
+}
+
+export async function deleteMenuCategory(id: string) {
+  const supabase = createSupabaseServerClient();
+  const { error } = await supabase.from("menu_categories").delete().eq("id", id);
   if (error) throw new Error(error.message);
   revalidatePath("/menu");
 }
@@ -286,4 +356,32 @@ export async function deleteSiteContent(key: string) {
   const { error } = await supabase.from("site_content").delete().eq("key", key);
   if (error) throw new Error(error.message);
   revalidatePath("/menu");
+}
+
+export interface SeasonalOfferState {
+  error?: string;
+  message?: string;
+}
+
+// Drafts one personalised message per client in the chosen segment into
+// pending_replies (type seasonal_offer). Runs in the background so the
+// request returns immediately; drafts appear as they finish.
+export async function startSeasonalOffer(
+  _prev: SeasonalOfferState,
+  formData: FormData
+): Promise<SeasonalOfferState> {
+  const offer = String(formData.get("offer") ?? "").trim();
+  const segment = String(formData.get("segment") ?? "all") as OfferSegment;
+  if (!offer) return { error: "offerRequired" };
+  if (!["all", "active", "dormant"].includes(segment)) return { error: "invalid" };
+
+  after(async () => {
+    try {
+      await createSeasonalOfferDrafts(offer, segment);
+    } catch (err) {
+      console.error("seasonal offer failed", err);
+    }
+  });
+  revalidatePath("/pending-replies");
+  return { message: "started" };
 }

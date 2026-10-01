@@ -19,7 +19,9 @@ export function formatDateTime(isoStr: string | null, lang: Lang) {
   });
 }
 
+// The business operates in Ukrainian hryvnia — matches the real site's
+// orders/menu pricing (₴, suffixed per Ukrainian convention), not USD.
 export function formatMoney(amount: number | null) {
   if (amount === null || amount === undefined) return "—";
-  return `$${amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  return `${amount.toLocaleString("uk-UA", { maximumFractionDigits: 0 })} ₴`;
 }

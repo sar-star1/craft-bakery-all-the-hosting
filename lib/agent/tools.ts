@@ -1,0 +1,237 @@
+import "server-only";
+import type Anthropic from "@anthropic-ai/sdk";
+import { getStorefrontLink } from "@/lib/clientToken";
+import type { createSupabaseServerClient } from "@/lib/supabase/server";
+import { notifyAdmin } from "@/lib/telegram";
+import type { PipelineStage } from "@/lib/types";
+import type { TurnFlags } from "./policy";
+
+export interface ToolContext {
+  supabase: ReturnType<typeof createSupabaseServerClient>;
+  client: { id: string; business_name: string; pipeline_stage: PipelineStage };
+  conversationId: string;
+  flags: TurnFlags;
+}
+
+export const AGENT_TOOLS: Anthropic.Tool[] = [
+  {
+    name: "get_price",
+    description:
+      "Look up current menu items and prices by name (in Ukrainian or transliterated). Returns matching items with price in UAH, any promo price, weight, and minimum order. The ONLY valid source for any price you state.",
+    input_schema: {
+      type: "object",
+      properties: { query: { type: "string", description: "Item name or part of it, e.g. 'круасан' or 'наполеон'" } },
+      required: ["query"],
+    },
+  },
+  {
+    name: "check_capacity",
+    description:
+      "Look up production capacity and lead-time rules for a requested quantity/date. Returns the bakery's capacity rules and the relevant category minimums. The ONLY valid source for any capacity or lead-time claim. If the rules don't clearly cover the question, call request_human_review instead of guessing.",
+    input_schema: {
+      type: "object",
+      properties: {
+        item: { type: "string", description: "What they want, e.g. 'круасани'" },
+        quantity: { type: "number", description: "Requested quantity" },
+        needed_by: { type: "string", description: "Requested date if any, YYYY-MM-DD" },
+      },
+      required: ["quantity"],
+    },
+  },
+  {
+    name: "get_delivery_terms",
+    description:
+      "Get delivery zones, days, costs, minimum order amounts and payment terms. The ONLY valid source for any delivery or payment claim.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "get_client_history",
+    description:
+      "Get this client's record: standing order notes, funnel stage, last contact/order dates, and their most recent orders.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "update_captured_fields",
+    description:
+      "Save facts learned about this client or their request so they're remembered next time (e.g. preferences, volumes, delivery address, decision-maker). Merges into the conversation's captured fields.",
+    input_schema: {
+      type: "object",
+      properties: { fields: { type: "object", description: "Key/value facts to remember" } },
+      required: ["fields"],
+    },
+  },
+  {
+    name: "send_menu_link",
+    description:
+      "Get this client's personal ordering-page link. Orders are placed on the website, not in chat — use this whenever they want to order or see the current menu, and include the returned URL in your reply.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "propose_confirmation",
+    description:
+      "Call when your reply proposes or confirms something that commits the bakery (a standing arrangement, a special condition, a change to a regular order). A human approves such replies before they're sent.",
+    input_schema: {
+      type: "object",
+      properties: { summary: { type: "string", description: "One-line summary of what is being proposed" } },
+      required: ["summary"],
+    },
+  },
+  {
+    name: "flag_mass_order",
+    description:
+      "Call immediately when the client mentions bulk/mass ordering, the standardized product line (СТАНДАРТИЗОВАНА ЛІНІЙКА), or volumes far beyond a normal cafe order. Notifies the admin; the conversation then requires human approval.",
+    input_schema: {
+      type: "object",
+      properties: { matched_text: { type: "string", description: "The client's words that triggered this" } },
+      required: ["matched_text"],
+    },
+  },
+  {
+    name: "request_human_review",
+    description:
+      "Call when you're unsure, the client is upset, asks for something outside the tools' coverage, or a tool returned nothing usable. Your drafted reply will wait for a human to approve instead of being sent automatically.",
+    input_schema: {
+      type: "object",
+      properties: { reason: { type: "string" } },
+      required: ["reason"],
+    },
+  },
+];
+
+function json(value: unknown): string {
+  return JSON.stringify(value, null, 2);
+}
+
+export async function runTool(name: string, input: unknown, ctx: ToolContext): Promise<string> {
+  const args = (input ?? {}) as Record<string, unknown>;
+  const { supabase, client, conversationId, flags } = ctx;
+
+  switch (name) {
+    case "get_price": {
+      const words = String(args.query ?? "")
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((w) => w.length > 1);
+      const [{ data: items }, { data: categories }] = await Promise.all([
+        supabase.from("menu_items").select("*").eq("is_active", true),
+        supabase.from("menu_categories").select("id, name_uk, min_order"),
+      ]);
+      const categoryById = new Map((categories ?? []).map((c) => [c.id as string, c]));
+      const scored = (items ?? [])
+        .map((i) => {
+          const hay = `${i.name_uk} ${categoryById.get(i.category_id)?.name_uk ?? ""}`.toLowerCase();
+          return { i, score: words.filter((w) => hay.includes(w)).length };
+        })
+        .filter((x) => x.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 8);
+      if (scored.length === 0) return "No matching menu items found.";
+      return json(
+        scored.map(({ i }) => ({
+          name: i.name_uk,
+          category: categoryById.get(i.category_id)?.name_uk,
+          price_uah: i.price,
+          original_price_uah: i.original_price,
+          promo: i.promo_label,
+          weight: i.weight,
+          min_order: i.min_order_override ?? categoryById.get(i.category_id)?.min_order,
+        }))
+      );
+    }
+
+    case "check_capacity": {
+      const [{ data: rules }, { data: categories }] = await Promise.all([
+        supabase.from("capacity_rules").select("rule_type, value, notes"),
+        supabase.from("menu_categories").select("name_uk, min_order, note_uk"),
+      ]);
+      return json({
+        requested: { item: args.item ?? null, quantity: args.quantity, needed_by: args.needed_by ?? null },
+        capacity_rules: rules ?? [],
+        category_minimums: categories ?? [],
+        note:
+          (rules ?? []).length === 0
+            ? "No capacity rules are configured yet — you cannot make any capacity or lead-time claim; call request_human_review."
+            : "Answer only from these rules; if they don't cover the question, call request_human_review.",
+      });
+    }
+
+    case "get_delivery_terms": {
+      const { data } = await supabase.from("site_content").select("content_json").eq("key", "delivery_terms").maybeSingle();
+      return data?.content_json ? json(data.content_json) : "Delivery terms are not configured.";
+    }
+
+    case "get_client_history": {
+      const [{ data: row }, { data: orders }] = await Promise.all([
+        supabase
+          .from("clients")
+          .select("business_name, contact_name, pipeline_stage, standing_order_notes, last_contact_at, last_order_at")
+          .eq("id", client.id)
+          .single(),
+        supabase
+          .from("orders")
+          .select("created_at, item_summary_uk, total_amount, status")
+          .eq("client_id", client.id)
+          .order("created_at", { ascending: false })
+          .limit(10),
+      ]);
+      return json({ client: row, recent_orders: orders ?? [] });
+    }
+
+    case "update_captured_fields": {
+      const fields = (args.fields ?? {}) as Record<string, unknown>;
+      const { data: convo } = await supabase.from("conversations").select("captured_fields").eq("id", conversationId).single();
+      const merged = { ...((convo?.captured_fields as Record<string, unknown>) ?? {}), ...fields };
+      await supabase.from("conversations").update({ captured_fields: merged }).eq("id", conversationId);
+      return "Saved.";
+    }
+
+    case "send_menu_link": {
+      const link = getStorefrontLink(client.id);
+      if (!link) {
+        flags.humanReviewReasons.push("ordering link unavailable (SITE_URL not set)");
+        return "The ordering link is unavailable right now. Tell the client you'll send it shortly.";
+      }
+      flags.menuLinkSent = true;
+      if (client.pipeline_stage === "new_lead" || client.pipeline_stage === "qualifying") {
+        await supabase.from("clients").update({ pipeline_stage: "menu_sent" }).eq("id", client.id);
+        client.pipeline_stage = "menu_sent";
+      }
+      return `Personal ordering link (include exactly as-is): ${link}`;
+    }
+
+    case "propose_confirmation": {
+      flags.confirmationProposed = true;
+      const { data: convo } = await supabase.from("conversations").select("captured_fields").eq("id", conversationId).single();
+      await supabase
+        .from("conversations")
+        .update({
+          status: "confirming",
+          captured_fields: { ...((convo?.captured_fields as Record<string, unknown>) ?? {}), proposal: args.summary },
+        })
+        .eq("id", conversationId);
+      return "Recorded. A human will review this reply before it's sent.";
+    }
+
+    case "flag_mass_order": {
+      flags.massOrderFlagged = true;
+      await supabase.from("mass_order_flags").insert({
+        client_id: client.id,
+        conversation_id: conversationId,
+        matched_text: String(args.matched_text ?? ""),
+      });
+      const base = process.env.SITE_URL?.replace(/\/$/, "");
+      await notifyAdmin(
+        `Масове замовлення: ${client.business_name}\n«${String(args.matched_text ?? "")}»${base ? `\n${base}/clients/${client.id}` : ""}`
+      );
+      return "Flagged. The admin has been notified; a human will handle the reply.";
+    }
+
+    case "request_human_review": {
+      flags.humanReviewReasons.push(String(args.reason ?? "unspecified"));
+      return "Noted. Write the best reply you can; a human will review it before it's sent.";
+    }
+
+    default:
+      return `Unknown tool: ${name}`;
+  }
+}

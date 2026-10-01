@@ -65,6 +65,36 @@ export default function DetailPanel({
               <p className="text-stone-700">{order.customer_contact}</p>
             </div>
           )}
+          {details?.email && (
+            <div>
+              <p className="text-stone-400 text-[11px] uppercase tracking-wide mb-1">{t.orderEmail}</p>
+              <p className="text-stone-700 break-all">{details.email}</p>
+            </div>
+          )}
+          {details?.address && (
+            <div>
+              <p className="text-stone-400 text-[11px] uppercase tracking-wide mb-1">{t.orderAddress}</p>
+              <p className="text-stone-700">{details.address}</p>
+            </div>
+          )}
+          {details?.items && details.items.length > 0 && (
+            <div>
+              <p className="text-stone-400 text-[11px] uppercase tracking-wide mb-1">{t.orderItems}</p>
+              <ul className="space-y-1">
+                {details.items.map((line, i) => (
+                  <li key={i} className="flex justify-between gap-3 text-[13px] text-stone-700">
+                    <span className="min-w-0">
+                      {line.name}
+                      <span className="text-stone-400"> · {line.category}</span>
+                    </span>
+                    <span className="whitespace-nowrap text-stone-500">
+                      {line.qty} × {formatMoney(line.unit_price)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div>
             <p className="text-stone-400 text-[11px] uppercase tracking-wide mb-1">{t.deposit}</p>
             <p className="text-stone-700">
