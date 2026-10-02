@@ -9,7 +9,6 @@ import {
   nextStatus,
   prevStatus,
   type DepositStatus,
-  type OrderCategory,
   type OrderStatus,
   type PipelineStage,
 } from "@/lib/types";
@@ -24,7 +23,6 @@ export async function createOrder(
   _prevState: CreateOrderState,
   formData: FormData
 ): Promise<CreateOrderState> {
-  const category = String(formData.get("category") ?? "") as OrderCategory;
   const customerName = String(formData.get("customer_name") ?? "").trim();
   const customerContact = String(formData.get("customer_contact") ?? "").trim();
   const itemSummary = String(formData.get("item_summary_uk") ?? "").trim();
@@ -39,7 +37,6 @@ export async function createOrder(
 
   const supabase = createSupabaseServerClient();
   const { error } = await supabase.from("orders").insert({
-    category,
     source: "manual",
     customer_name: customerName,
     customer_contact: customerContact || null,
@@ -194,6 +191,17 @@ export async function createClient(
 export async function updateClientPipelineStage(id: string, stage: PipelineStage) {
   const supabase = createSupabaseServerClient();
   const { error } = await supabase.from("clients").update({ pipeline_stage: stage }).eq("id", id);
+  if (error) throw new Error(error.message);
+  revalidatePath("/clients");
+  revalidatePath(`/clients/${id}`);
+}
+
+export async function updateClientBlockerNote(id: string, note: string) {
+  const supabase = createSupabaseServerClient();
+  const { error } = await supabase
+    .from("clients")
+    .update({ blocker_note: note.trim().slice(0, 500) || null })
+    .eq("id", id);
   if (error) throw new Error(error.message);
   revalidatePath("/clients");
   revalidatePath(`/clients/${id}`);

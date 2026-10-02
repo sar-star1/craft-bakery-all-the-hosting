@@ -14,7 +14,8 @@ create table clients (
   -- client can be 'recurring' and still show 'dormant' status if they've
   -- gone quiet. Drives the grouped Clients pipeline view.
   pipeline_stage text not null default 'new_lead'
-    check (pipeline_stage in ('new_lead', 'qualifying', 'menu_sent', 'first_order', 'recurring', 'dormant')),
+    check (pipeline_stage in ('new_lead', 'cold', 'warm', 'menu_sent', 'first_order', 'recurring', 'dormant')),
+  blocker_note text,   -- cold: their open questions/concerns; warm: what's holding them back
   standing_order_notes text,
   last_contact_at timestamptz,
   last_order_at timestamptz,
@@ -34,7 +35,6 @@ create table conversations (
 create table orders (
   id uuid primary key default gen_random_uuid(),
   client_id uuid references clients(id),
-  category text not null check (category in ('b2c', 'b2b', 'standard_line')),
   source text not null check (source in ('website_form', 'telegram', 'manual')),
   customer_name text not null,
   customer_contact text,              -- phone, Telegram handle, or email

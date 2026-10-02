@@ -3,7 +3,7 @@
 import { useActionState, useEffect, useRef, useState } from "react";
 import { createOrder, type CreateOrderState } from "@/app/actions";
 import type { Lang } from "@/lib/i18n";
-import { CATEGORY_LABEL, STR } from "@/lib/i18n";
+import { STR } from "@/lib/i18n";
 
 const initialState: CreateOrderState = {};
 
@@ -69,19 +69,6 @@ export default function NewOrderForm({
         <p className="text-stone-500 text-sm mb-5">{t.formSubtitle}</p>
 
         <div className="space-y-4">
-          <div>
-            <label className="text-[12px] text-stone-500 block mb-1">{t.fCategory}</label>
-            <select
-              name="category"
-              defaultValue="b2c"
-              className="w-full border border-stone-200 rounded px-3 py-2 text-sm"
-            >
-              <option value="b2c">{CATEGORY_LABEL[lang].b2c}</option>
-              <option value="b2b">{CATEGORY_LABEL[lang].b2b}</option>
-              <option value="standard_line">{CATEGORY_LABEL[lang].standard_line}</option>
-            </select>
-          </div>
-
           <div>
             <label className="text-[12px] text-stone-500 block mb-1">{t.fCustomer}</label>
             <input

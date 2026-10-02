@@ -1,7 +1,7 @@
 "use client";
 
 import type { Lang } from "@/lib/i18n";
-import { CATEGORY_BADGE, CATEGORY_LABEL, SOURCE_DOT, SOURCE_LABEL, STR } from "@/lib/i18n";
+import { SOURCE_DOT, SOURCE_LABEL, STR } from "@/lib/i18n";
 import { STATUS_COLUMNS, type Order } from "@/lib/types";
 import { formatDate, formatMoney } from "@/lib/utils";
 
@@ -33,11 +33,6 @@ export default function OrderCard({
           </p>
           <p className="text-[13px] text-stone-500 mt-0.5 leading-snug">{itemSummary}</p>
         </div>
-        <span
-          className={`text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 whitespace-nowrap ${CATEGORY_BADGE[order.category]}`}
-        >
-          {CATEGORY_LABEL[lang][order.category]}
-        </span>
       </div>
 
       <div className="flex items-center gap-3 mt-3 text-[12px] text-stone-500">

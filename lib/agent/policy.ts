@@ -33,7 +33,10 @@ export function decideOrderFlowReply(input: {
   if (flags.confirmationProposed) {
     return { mode: "gate", reason: "proposes a commitment" };
   }
-  if (pipelineStage === "new_lead" || pipelineStage === "qualifying" || pipelineStage === "menu_sent") {
+  if (pipelineStage === "new_lead" ||
+    pipelineStage === "cold" ||
+    pipelineStage === "warm" ||
+    pipelineStage === "menu_sent") {
     return { mode: "gate", reason: "client hasn't ordered yet" };
   }
   return { mode: "send" };

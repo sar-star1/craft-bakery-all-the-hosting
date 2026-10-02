@@ -1,4 +1,3 @@
-export type OrderCategory = "b2c" | "b2b" | "standard_line";
 export type OrderSource = "website_form" | "telegram" | "manual";
 export type OrderStatus =
   | "pending_review"
@@ -30,7 +29,6 @@ export interface OrderDetails {
 export interface Order {
   id: string;
   client_id: string | null;
-  category: OrderCategory;
   source: OrderSource;
   customer_name: string;
   customer_contact: string | null;
@@ -70,7 +68,8 @@ export type ClientStatus = "active" | "engaged" | "dormant";
 export type ClientSource = "instagram" | "website_form" | "manual_migration";
 export type PipelineStage =
   | "new_lead"
-  | "qualifying"
+  | "cold"
+  | "warm"
   | "menu_sent"
   | "first_order"
   | "recurring"
@@ -78,7 +77,8 @@ export type PipelineStage =
 
 export const PIPELINE_STAGES: PipelineStage[] = [
   "new_lead",
-  "qualifying",
+  "cold",
+  "warm",
   "menu_sent",
   "first_order",
   "recurring",
@@ -93,6 +93,9 @@ export interface Client {
   status: ClientStatus;
   pipeline_stage: PipelineStage;
   standing_order_notes: string | null;
+  // What a not-yet-ordering lead is asking about (cold) or what is holding
+  // them back (warm). Written by the agent, editable by admins.
+  blocker_note: string | null;
   last_contact_at: string | null;
   last_order_at: string | null;
   source: ClientSource | null;

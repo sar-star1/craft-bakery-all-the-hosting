@@ -14,12 +14,13 @@ interface JobClient {
   contact_name: string | null;
   standing_order_notes: string | null;
   pipeline_stage: string;
+  blocker_note: string | null;
   status: string;
   last_contact_at: string | null;
   last_order_at: string | null;
 }
 const JOB_COLUMNS =
-  "id, business_name, contact_name, standing_order_notes, pipeline_stage, status, last_contact_at, last_order_at";
+  "id, business_name, contact_name, standing_order_notes, pipeline_stage, blocker_note, status, last_contact_at, last_order_at";
 
 async function getRuleNumber(db: Db, ruleType: string, fallback: number): Promise<number> {
   const { data } = await db.from("capacity_rules").select("value").eq("rule_type", ruleType).maybeSingle();
@@ -44,6 +45,8 @@ async function queueDraft(db: Db, client: JobClient, kind: OutboundKind, offerTe
     businessName: client.business_name,
     contactName: client.contact_name,
     standingOrderNotes: client.standing_order_notes,
+    leadStage: client.pipeline_stage,
+    blockerNote: client.blocker_note,
     recentOrders: await recentOrderSummaries(db, client.id),
     offerText,
   });
@@ -138,7 +141,7 @@ export async function runRemarketing(): Promise<JobResult> {
     .from("clients")
     .select(JOB_COLUMNS)
     .not("telegram_chat_id", "is", null)
-    .or(`and(pipeline_stage.in.(qualifying,menu_sent),last_contact_at.lt.${cutoff}),pipeline_stage.eq.dormant`);
+    .or(`and(pipeline_stage.in.(cold,warm,menu_sent),last_contact_at.lt.${cutoff}),pipeline_stage.eq.dormant`);
 
   let created = 0;
   for (const client of (clients ?? []) as JobClient[]) {

@@ -2,11 +2,9 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { updateClientPipelineStage } from "@/app/actions";
+import { updateClientBlockerNote, updateClientPipelineStage } from "@/app/actions";
 import type { Lang } from "@/lib/i18n";
 import {
-  CATEGORY_BADGE,
-  CATEGORY_LABEL,
   CLIENT_STATUS_BADGE,
   CLIENT_STATUS_KEY,
   PIPELINE_STAGE_BADGE,
@@ -38,6 +36,8 @@ export default function ClientDetail({
 }) {
   const [lang, setLang] = useState<Lang>("uk");
   const [stage, setStage] = useState(client.pipeline_stage);
+  const [blocker, setBlocker] = useState(client.blocker_note ?? "");
+  const [blockerSaved, setBlockerSaved] = useState(false);
   const [, startTransition] = useTransition();
   const t = STR[lang];
 
@@ -48,6 +48,15 @@ export default function ClientDetail({
       await updateClientPipelineStage(client.id, next);
     });
   };
+
+  const saveBlocker = () => {
+    setBlockerSaved(true);
+    if (sampleMode) return;
+    startTransition(async () => {
+      await updateClientBlockerNote(client.id, blocker);
+    });
+  };
+  const isLead = stage === "new_lead" || stage === "cold" || stage === "warm" || stage === "menu_sent";
 
   return (
     <div className="min-h-screen bg-[#FAF6EF] flex text-stone-900">
@@ -116,6 +125,29 @@ export default function ClientDetail({
               {t.clientStandingOrder}
             </p>
             <p className="text-stone-700 text-sm">{client.standing_order_notes}</p>
+          </div>
+        )}
+
+        {isLead && (
+          <div className="bg-white rounded-md border border-stone-200 p-4 mb-6">
+            <p className="text-stone-400 text-[11px] uppercase tracking-wide mb-1">{t.clientBlocker}</p>
+            <textarea
+              value={blocker}
+              onChange={(e) => {
+                setBlocker(e.target.value);
+                setBlockerSaved(false);
+              }}
+              rows={2}
+              placeholder={t.clientBlockerPh}
+              className="w-full border border-stone-200 rounded px-3 py-2 text-sm"
+            />
+            <button
+              onClick={saveBlocker}
+              disabled={blockerSaved}
+              className="mt-2 text-[12px] bg-stone-900 text-white px-3 py-1.5 rounded hover:bg-stone-800 disabled:opacity-40"
+            >
+              {t.clientBlockerSave}
+            </button>
           </div>
         )}
 
@@ -191,11 +223,6 @@ export default function ClientDetail({
                       </p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
-                      <span
-                        className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${CATEGORY_BADGE[order.category]}`}
-                      >
-                        {CATEGORY_LABEL[lang][order.category]}
-                      </span>
                       <span className="text-sm font-medium text-stone-700">
                         {formatMoney(order.total_amount)}
                       </span>
