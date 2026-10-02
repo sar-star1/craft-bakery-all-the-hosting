@@ -59,7 +59,7 @@ if (command === "me") {
     process.exit(1);
   }
   const url = `${arg.replace(/\/$/, "")}/api/telegram/webhook`;
-  await api("setWebhook", { url, secret_token: secret, allowed_updates: ["message"], drop_pending_updates: true });
+  await api("setWebhook", { url, secret_token: secret, allowed_updates: ["message", "callback_query"], drop_pending_updates: true });
   console.log(`Webhook set: ${url}`);
 } else if (command === "webhook-info") {
   console.log(JSON.stringify(await api("getWebhookInfo"), null, 2));

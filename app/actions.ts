@@ -4,7 +4,8 @@ import { after } from "next/server";
 import { revalidatePath } from "next/cache";
 import { createSeasonalOfferDrafts, type OfferSegment } from "@/lib/jobs";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { getBotDeepLink, sendTelegramMessage } from "@/lib/telegram";
+import { rejectPendingReply as rejectReply, sendPendingReply } from "@/lib/replies";
+import { getBotDeepLink } from "@/lib/telegram";
 import {
   nextStatus,
   prevStatus,
@@ -82,68 +83,14 @@ export interface PendingReplyActionState {
   error?: string;
 }
 
-// Approving IS sending: this calls the Telegram bot's sendMessage right
-// away, then flips status straight to 'approved_sent' — there's no
-// separate "approved but not yet delivered" state (see schema.sql).
 export async function approvePendingReply(id: string): Promise<PendingReplyActionState> {
-  const supabase = createSupabaseServerClient();
-
-  const { data: reply, error: fetchError } = await supabase
-    .from("pending_replies")
-    .select("id, draft_text, client_id, conversation_id")
-    .eq("id", id)
-    .single();
-
-  if (fetchError || !reply) {
-    return { error: fetchError?.message ?? "Draft not found." };
-  }
-
-  const { data: client, error: clientError } = await supabase
-    .from("clients")
-    .select("telegram_chat_id")
-    .eq("id", reply.client_id)
-    .single();
-
-  if (clientError || !client?.telegram_chat_id) {
-    return { error: "This client has no linked Telegram chat yet." };
-  }
-
-  const sendResult = await sendTelegramMessage(client.telegram_chat_id, reply.draft_text);
-  if (!sendResult.ok) {
-    return { error: sendResult.error };
-  }
-
-  const { error: updateError } = await supabase
-    .from("pending_replies")
-    .update({ status: "approved_sent" })
-    .eq("id", id);
-
-  if (updateError) return { error: updateError.message };
-
-  await supabase.from("messages").insert({
-    client_id: reply.client_id,
-    conversation_id: reply.conversation_id,
-    direction: "out",
-    text: reply.draft_text,
-    telegram_message_id: sendResult.messageId ?? null,
-  });
-
-  revalidatePath("/clients");
-  revalidatePath("/pending-replies");
-  return {};
+  const result = await sendPendingReply(id);
+  return result.ok ? {} : { error: result.error };
 }
 
 export async function rejectPendingReply(id: string): Promise<PendingReplyActionState> {
-  const supabase = createSupabaseServerClient();
-  const { error } = await supabase
-    .from("pending_replies")
-    .update({ status: "rejected" })
-    .eq("id", id);
-
-  if (error) return { error: error.message };
-  revalidatePath("/clients");
-  revalidatePath("/pending-replies");
-  return {};
+  const result = await rejectReply(id);
+  return result.ok ? {} : { error: result.error };
 }
 
 export interface CreateClientState {

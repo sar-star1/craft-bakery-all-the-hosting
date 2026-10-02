@@ -4,9 +4,16 @@ export function isTelegramConfigured() {
   return Boolean(process.env.TELEGRAM_BOT_TOKEN);
 }
 
+export interface InlineButton {
+  text: string;
+  callback_data?: string;
+  url?: string;
+}
+
 export async function sendTelegramMessage(
   chatId: string,
-  text: string
+  text: string,
+  opts?: { buttons?: InlineButton[][] }
 ): Promise<{ ok: boolean; error?: string; messageId?: number }> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) {
@@ -17,13 +24,42 @@ export async function sendTelegramMessage(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     // Telegram caps a message at 4096 characters.
-    body: JSON.stringify({ chat_id: chatId, text: text.slice(0, 4096) }),
+    body: JSON.stringify({
+      chat_id: chatId,
+      text: text.slice(0, 4096),
+      ...(opts?.buttons ? { reply_markup: { inline_keyboard: opts.buttons } } : {}),
+    }),
   });
   const json = await res.json();
   if (!json.ok) {
     return { ok: false, error: json.description ?? "Telegram API error" };
   }
   return { ok: true, messageId: json.result?.message_id };
+}
+
+async function telegramCall(method: string, body: Record<string, unknown>): Promise<void> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return;
+  await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }).catch(() => {});
+}
+
+// Acknowledges a button press (the small toast the admin sees).
+export function answerCallbackQuery(callbackQueryId: string, text?: string) {
+  return telegramCall("answerCallbackQuery", { callback_query_id: callbackQueryId, text, show_alert: false });
+}
+
+// Rewrites an alert in place and removes its buttons.
+export function editTelegramMessage(chatId: string, messageId: number, text: string) {
+  return telegramCall("editMessageText", {
+    chat_id: chatId,
+    message_id: messageId,
+    text: text.slice(0, 4096),
+    reply_markup: { inline_keyboard: [] },
+  });
 }
 
 // Best-effort "typing…" indicator while the agent thinks.
@@ -39,12 +75,15 @@ export async function sendTypingAction(chatId: string): Promise<void> {
 
 // Admin notifications (new orders, mass-order flags, new drafts) go to this
 // separate group, distinct from any individual client chat.
-export async function notifyAdmin(text: string): Promise<{ ok: boolean; error?: string }> {
+export async function notifyAdmin(
+  text: string,
+  opts?: { buttons?: InlineButton[][] }
+): Promise<{ ok: boolean; error?: string; messageId?: number }> {
   const groupId = process.env.TELEGRAM_ADMIN_GROUP_ID;
   if (!groupId) {
     return { ok: false, error: "TELEGRAM_ADMIN_GROUP_ID is not configured." };
   }
-  return sendTelegramMessage(groupId, text);
+  return sendTelegramMessage(groupId, text, opts);
 }
 
 // Migration deep links (t.me/<bot>?start=<payload>). Telegram's start

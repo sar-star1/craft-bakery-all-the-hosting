@@ -2,7 +2,7 @@ import "server-only";
 import { draftOutbound, type OutboundKind } from "@/lib/agent/draft";
 import { isAnthropicConfigured } from "@/lib/agent/anthropic";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { notifyAdmin } from "@/lib/telegram";
+import { announceDrafts } from "@/lib/adminAlerts";
 
 type Db = ReturnType<typeof createSupabaseServerClient>;
 
@@ -38,7 +38,7 @@ async function recentOrderSummaries(db: Db, clientId: string, limit = 5): Promis
   return (data ?? []).map((o) => `${String(o.created_at).slice(0, 10)}: ${o.item_summary_uk}`);
 }
 
-async function queueDraft(db: Db, client: JobClient, kind: OutboundKind, offerText?: string): Promise<boolean> {
+async function queueDraft(db: Db, client: JobClient, kind: OutboundKind, offerText?: string): Promise<string | null> {
   const text = await draftOutbound({
     kind,
     clientId: client.id,
@@ -50,9 +50,13 @@ async function queueDraft(db: Db, client: JobClient, kind: OutboundKind, offerTe
     recentOrders: await recentOrderSummaries(db, client.id),
     offerText,
   });
-  if (!text) return false;
-  const { error } = await db.from("pending_replies").insert({ client_id: client.id, draft_text: text, reply_type: kind });
-  return !error;
+  if (!text) return null;
+  const { data } = await db
+    .from("pending_replies")
+    .insert({ client_id: client.id, draft_text: text, reply_type: kind })
+    .select("id")
+    .single();
+  return (data?.id as string | undefined) ?? null;
 }
 
 async function alreadyDrafted(db: Db, clientId: string, kind: OutboundKind, withinDays: number): Promise<boolean> {
@@ -64,12 +68,6 @@ async function alreadyDrafted(db: Db, clientId: string, kind: OutboundKind, with
     .eq("reply_type", kind)
     .gte("created_at", since);
   return (count ?? 0) > 0;
-}
-
-async function notifyDrafts(count: number, label: string) {
-  if (count === 0) return;
-  const base = process.env.SITE_URL?.replace(/\/$/, "");
-  await notifyAdmin(`${label}: ${count} нових чернеток чекають на підтвердження.${base ? `\n${base}/pending-replies` : ""}`);
 }
 
 export interface JobResult {
@@ -104,7 +102,7 @@ export async function runWeeklyReminders(): Promise<JobResult> {
     .not("telegram_chat_id", "is", null)
     .in("pipeline_stage", ["first_order", "recurring"]);
 
-  let created = 0;
+  const draftIds: string[] = [];
   for (const client of (clients ?? []) as JobClient[]) {
     const { data: orders } = await db
       .from("orders")
@@ -121,11 +119,12 @@ export async function runWeeklyReminders(): Promise<JobResult> {
     if (daysSince <= avgGap + 1) continue;
     if (await alreadyDrafted(db, client.id, "weekly_reminder", Math.max(5, Math.round(avgGap)))) continue;
 
-    if (await queueDraft(db, client, "weekly_reminder")) created++;
+    const id = await queueDraft(db, client, "weekly_reminder");
+    if (id) draftIds.push(id);
   }
 
-  await notifyDrafts(created, "Нагадування регулярним клієнтам");
-  return { ok: true, created };
+  await announceDrafts(db, draftIds, "Нагадування регулярним клієнтам");
+  return { ok: true, created: draftIds.length };
 }
 
 // Re-engagement: leads who looked but never ordered, and clients gone dormant.
@@ -143,14 +142,15 @@ export async function runRemarketing(): Promise<JobResult> {
     .not("telegram_chat_id", "is", null)
     .or(`and(pipeline_stage.in.(cold,warm,menu_sent),last_contact_at.lt.${cutoff}),pipeline_stage.eq.dormant`);
 
-  let created = 0;
+  const draftIds: string[] = [];
   for (const client of (clients ?? []) as JobClient[]) {
     if (await alreadyDrafted(db, client.id, "remarketing", 30)) continue;
-    if (await queueDraft(db, client, "remarketing")) created++;
+    const id = await queueDraft(db, client, "remarketing");
+    if (id) draftIds.push(id);
   }
 
-  await notifyDrafts(created, "Повторне залучення клієнтів");
-  return { ok: true, created, skipped: dormantCount ? `${dormantCount} clients marked dormant` : undefined };
+  await announceDrafts(db, draftIds, "Повторне залучення клієнтів");
+  return { ok: true, created: draftIds.length, skipped: dormantCount ? `${dormantCount} clients marked dormant` : undefined };
 }
 
 export type OfferSegment = "all" | "active" | "dormant";
@@ -166,13 +166,13 @@ export async function createSeasonalOfferDrafts(offerText: string, segment: Offe
   const { data: clients } = await query;
 
   const list = (clients ?? []) as JobClient[];
-  let created = 0;
+  const draftIds: string[] = [];
   const CONCURRENCY = 5;
   for (let i = 0; i < list.length; i += CONCURRENCY) {
     const results = await Promise.all(list.slice(i, i + CONCURRENCY).map((c) => queueDraft(db, c, "seasonal_offer", offerText)));
-    created += results.filter(Boolean).length;
+    for (const id of results) if (id) draftIds.push(id);
   }
 
-  await notifyDrafts(created, "Сезонна пропозиція");
-  return { ok: true, created };
+  await announceDrafts(db, draftIds, "Сезонна пропозиція");
+  return { ok: true, created: draftIds.length };
 }

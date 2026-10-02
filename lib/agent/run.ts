@@ -1,6 +1,8 @@
 import "server-only";
 import type Anthropic from "@anthropic-ai/sdk";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { announceDraft } from "@/lib/adminAlerts";
+import { handleAdminUpdate } from "@/lib/adminBot";
 import { notifyAdmin, sendTelegramMessage, sendTypingAction, startPayloadToClientId } from "@/lib/telegram";
 import type { ClientSource, PipelineStage } from "@/lib/types";
 import { AGENT_MODEL, getAnthropic, isAnthropicConfigured } from "./anthropic";
@@ -13,10 +15,17 @@ export interface TelegramMessage {
   text?: string;
   chat: { id: number; type: string };
   from?: { id: number; is_bot?: boolean; first_name?: string; last_name?: string; username?: string };
+  reply_to_message?: { message_id: number; text?: string };
 }
 export interface TelegramUpdate {
   update_id: number;
   message?: TelegramMessage;
+  callback_query?: {
+    id: string;
+    from?: TelegramMessage["from"];
+    message?: TelegramMessage;
+    data?: string;
+  };
 }
 
 type Db = ReturnType<typeof createSupabaseServerClient>;
@@ -42,6 +51,14 @@ const dashboardLink = (path: string) => {
 };
 
 export async function processTelegramUpdate(update: TelegramUpdate): Promise<void> {
+  // The admin group (button presses, replies to drafts) is handled separately.
+  if (await handleAdminUpdate(update).catch((err) => {
+    console.error("handleAdminUpdate failed", err);
+    return true;
+  })) {
+    return;
+  }
+
   const msg = update.message;
   // Only 1:1 chats with clients. The admin group and channels are ignored.
   if (!msg || msg.chat.type !== "private" || msg.from?.is_bot) return;
@@ -242,15 +259,27 @@ async function handleMessage(msg: TelegramMessage, text: string) {
   });
 
   if (decision.mode === "gate") {
-    await db.from("pending_replies").insert({
-      client_id: clientRow.id,
-      conversation_id: conversation.id,
-      draft_text: reply,
-      reply_type: "order_flow",
-    });
-    await notifyAdmin(
-      `Чернетка відповіді для ${clientRow.business_name} (${decision.reason}):\n«${reply.slice(0, 500)}»${dashboardLink("/pending-replies")}`
-    );
+    const { data: draft } = await db
+      .from("pending_replies")
+      .insert({
+        client_id: clientRow.id,
+        conversation_id: conversation.id,
+        draft_text: reply,
+        reply_type: "order_flow",
+      })
+      .select("id")
+      .single();
+    if (draft) {
+      await announceDraft(db, {
+        id: draft.id as string,
+        clientId: clientRow.id,
+        clientName: clientRow.business_name,
+        replyType: "order_flow",
+        text: reply,
+        clientMessage: text,
+        reason: decision.reason,
+      });
+    }
     return;
   }
 

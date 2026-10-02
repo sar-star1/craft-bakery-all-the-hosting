@@ -1,0 +1,86 @@
+import "server-only";
+import { revalidatePath } from "next/cache";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { sendTelegramMessage } from "@/lib/telegram";
+
+export type ReplyResult =
+  | { ok: true; clientName: string }
+  | { ok: false; error: string; alreadyHandled?: boolean };
+
+function refresh() {
+  try {
+    revalidatePath("/clients");
+    revalidatePath("/pending-replies");
+  } catch {
+    // Not inside a request scope — the pages are force-dynamic anyway.
+  }
+}
+
+// Sends a drafted reply to the client now. Used by both the dashboard and the
+// admin Telegram group. The draft is claimed first (awaiting → approved_sent,
+// only if still awaiting) so two admins pressing at once can't double-send;
+// if Telegram then refuses the send, the claim is released.
+// `text` replaces the draft — that's the "reply with your own wording" path.
+export async function sendPendingReply(id: string, opts?: { text?: string }): Promise<ReplyResult> {
+  const db = createSupabaseServerClient();
+
+  const { data: reply } = await db
+    .from("pending_replies")
+    .select("id, draft_text, client_id, conversation_id, status")
+    .eq("id", id)
+    .maybeSingle();
+  if (!reply) return { ok: false, error: "Draft not found." };
+  if (reply.status !== "awaiting_approval") return { ok: false, error: "Already handled.", alreadyHandled: true };
+
+  const { data: client } = await db
+    .from("clients")
+    .select("business_name, telegram_chat_id")
+    .eq("id", reply.client_id)
+    .maybeSingle();
+  if (!client?.telegram_chat_id) return { ok: false, error: "This client has no linked Telegram chat yet." };
+
+  const text = opts?.text?.trim() || (reply.draft_text as string);
+
+  const { data: claimed } = await db
+    .from("pending_replies")
+    .update({ status: "approved_sent", draft_text: text })
+    .eq("id", id)
+    .eq("status", "awaiting_approval")
+    .select("id");
+  if (!claimed?.length) return { ok: false, error: "Already handled.", alreadyHandled: true };
+
+  const sent = await sendTelegramMessage(client.telegram_chat_id as string, text);
+  if (!sent.ok) {
+    await db
+      .from("pending_replies")
+      .update({ status: "awaiting_approval", draft_text: reply.draft_text })
+      .eq("id", id);
+    return { ok: false, error: sent.error ?? "Telegram refused the message." };
+  }
+
+  await db.from("messages").insert({
+    client_id: reply.client_id,
+    conversation_id: reply.conversation_id,
+    direction: "out",
+    text,
+    telegram_message_id: sent.messageId ?? null,
+  });
+
+  refresh();
+  return { ok: true, clientName: client.business_name as string };
+}
+
+export async function rejectPendingReply(id: string): Promise<ReplyResult> {
+  const db = createSupabaseServerClient();
+  const { data } = await db
+    .from("pending_replies")
+    .update({ status: "rejected" })
+    .eq("id", id)
+    .eq("status", "awaiting_approval")
+    .select("client_id");
+  if (!data?.length) return { ok: false, error: "Already handled.", alreadyHandled: true };
+
+  const { data: client } = await db.from("clients").select("business_name").eq("id", data[0].client_id).maybeSingle();
+  refresh();
+  return { ok: true, clientName: (client?.business_name as string) ?? "" };
+}
