@@ -13,6 +13,19 @@ const KIND_INSTRUCTIONS: Record<OutboundKind, string> = {
     "Це сезонна пропозиція від пекарні. Персоналізуй її під клієнта (його звичні позиції, тип закладу), коротко й привабливо, і запроси переглянути меню за посиланням.",
 };
 
+// Re-engagement is tailored to where the lead got stuck: a cold lead gets a
+// low-pressure offer to answer questions; a warm one gets their specific
+// blocker addressed without inventing any facts or figures.
+function leadContext(stage?: string, blocker?: string | null): string {
+  if (stage === "cold") {
+    return `Стан ліда: холодний — ще не впевнений, мав питання чи сумніви${blocker ? ` (${blocker})` : ""}. Не тисни: коротко поверни до теми, запропонуй відповісти на питання.`;
+  }
+  if (stage === "warm") {
+    return `Стан ліда: теплий — хотів замовити, але щось заважало${blocker ? ` (${blocker})` : ""}. Делікатно згадай про це і запитай, чи вдалося вирішити, чи можемо допомогти. Не обіцяй нічого нового (знижок, умов) — лише запропонуй написати нам.`;
+  }
+  return "";
+}
+
 // Writes ONE outbound message for a client. It never states prices or figures
 // on its own: the link is inserted by code (so it can't be hallucinated), and
 // the only numbers allowed are those in the admin-provided offer text.
@@ -23,6 +36,8 @@ export async function draftOutbound(input: {
   contactName: string | null;
   standingOrderNotes: string | null;
   recentOrders: string[];
+  leadStage?: string;
+  blockerNote?: string | null;
   offerText?: string;
 }): Promise<string | null> {
   const link = getStorefrontLink(input.clientId);
@@ -44,6 +59,7 @@ export async function draftOutbound(input: {
           `Клієнт: ${input.businessName}${input.contactName ? ` (контакт: ${input.contactName})` : ""}`,
           `Нотатки про постійне замовлення: ${input.standingOrderNotes ?? "немає"}`,
           `Останні замовлення: ${input.recentOrders.length ? input.recentOrders.join("; ") : "немає"}`,
+          input.kind === "remarketing" ? leadContext(input.leadStage, input.blockerNote) : "",
           input.offerText ? `Текст пропозиції від адміністратора: ${input.offerText}` : "",
         ]
           .filter(Boolean)

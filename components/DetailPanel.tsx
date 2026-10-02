@@ -1,7 +1,7 @@
 "use client";
 
 import type { Lang } from "@/lib/i18n";
-import { CATEGORY_BADGE, CATEGORY_LABEL, SOURCE_DOT, SOURCE_LABEL, STR } from "@/lib/i18n";
+import { SOURCE_DOT, SOURCE_LABEL, STR } from "@/lib/i18n";
 import { STATUS_COLUMNS, type Order } from "@/lib/types";
 import { formatDate, formatMoney } from "@/lib/utils";
 
@@ -31,10 +31,7 @@ export default function DetailPanel({
         <button onClick={onClose} className="text-stone-400 hover:text-stone-700 text-sm mb-6">
           {t.close}
         </button>
-        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${CATEGORY_BADGE[order.category]}`}>
-          {CATEGORY_LABEL[lang][order.category]}
-        </span>
-        <h2 className="font-serif text-2xl text-stone-900 mt-3 leading-tight">{order.customer_name}</h2>
+        <h2 className="font-serif text-2xl text-stone-900 leading-tight">{order.customer_name}</h2>
         <p className="text-stone-500 text-sm mt-1">{itemSummary}</p>
 
         <div className="mt-6 space-y-4 text-sm">

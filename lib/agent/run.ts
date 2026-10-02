@@ -28,10 +28,11 @@ interface ClientRow {
   status: string;
   pipeline_stage: PipelineStage;
   standing_order_notes: string | null;
+  blocker_note: string | null;
 }
 
 const CLIENT_COLUMNS =
-  "id, business_name, contact_name, telegram_chat_id, status, pipeline_stage, standing_order_notes";
+  "id, business_name, contact_name, telegram_chat_id, status, pipeline_stage, standing_order_notes, blocker_note";
 const MAX_TOOL_ITERATIONS = 8;
 const HISTORY_LIMIT = 30;
 

@@ -29,7 +29,8 @@ export type SubmitOrderResult = { ok: true } | { ok: false; error: string; issue
 
 const NEXT_STAGE: Partial<Record<PipelineStage, PipelineStage>> = {
   new_lead: "first_order",
-  qualifying: "first_order",
+  cold: "first_order",
+  warm: "first_order",
   menu_sent: "first_order",
   first_order: "recurring",
   dormant: "recurring",
@@ -112,7 +113,6 @@ export async function submitWebsiteOrder(input: SubmitOrderInput): Promise<Submi
   const summary = lines.map((l) => `${l.name} ×${l.qty}`).join(", ");
   const { error } = await supabase.from("orders").insert({
     client_id: clientId,
-    category: "b2b",
     source: "website_form",
     customer_name: data.customer_name,
     customer_contact: data.phone,

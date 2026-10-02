@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { advanceOrderStatus, revertOrderStatus } from "@/app/actions";
 import type { Lang } from "@/lib/i18n";
 import { STR } from "@/lib/i18n";
@@ -8,7 +8,6 @@ import { nextStatus, prevStatus, type Order } from "@/lib/types";
 import Sidebar from "./Sidebar";
 import LangToggle from "./LangToggle";
 import StatsBar from "./StatsBar";
-import FilterBar, { type CategoryFilter } from "./FilterBar";
 import KanbanBoard from "./KanbanBoard";
 import DetailPanel from "./DetailPanel";
 import NewOrderForm from "./NewOrderForm";
@@ -24,7 +23,6 @@ export default function Dashboard({
 }) {
   const [lang, setLang] = useState<Lang>("uk");
   const [orders, setOrders] = useState(initialOrders);
-  const [filter, setFilter] = useState<CategoryFilter>("all");
   const [openOrderId, setOpenOrderId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [, startTransition] = useTransition();
@@ -68,7 +66,6 @@ export default function Dashboard({
     const newOrder: Order = {
       id: `ord_mock_${Date.now()}`,
       client_id: null,
-      category: String(formData.get("category") ?? "b2c") as Order["category"],
       source: "manual",
       customer_name: customerName,
       customer_contact: String(formData.get("customer_contact") ?? "").trim() || null,
@@ -86,11 +83,6 @@ export default function Dashboard({
     };
     setOrders((prev) => [newOrder, ...prev]);
   };
-
-  const filtered = useMemo(
-    () => (filter === "all" ? orders : orders.filter((o) => o.category === filter)),
-    [orders, filter]
-  );
 
   const openOrder = orders.find((o) => o.id === openOrderId) ?? null;
 
@@ -122,9 +114,8 @@ export default function Dashboard({
         </div>
 
         <StatsBar orders={orders} lang={lang} />
-        <FilterBar lang={lang} filter={filter} setFilter={setFilter} />
         <KanbanBoard
-          orders={filtered}
+          orders={orders}
           lang={lang}
           onAdvance={advance}
           onBack={back}

@@ -2,7 +2,6 @@
 // language. Structure preserved from the bakery-dashboard.jsx reference.
 import type {
   ClientStatus,
-  OrderCategory,
   OrderSource,
   PendingReplyStatus,
   PendingReplyType,
@@ -27,7 +26,6 @@ export const STR = {
     statActive: "Активні замовлення",
     statDeposit: "Очікують завдаток",
     statValue: "Сума в роботі",
-    filterAll: "Усі замовлення",
     colPendingReview: "Очікує перевірки",
     colNew: "Нове звернення",
     colConfirmed: "Підтверджено",
@@ -47,7 +45,6 @@ export const STR = {
     advance: "Наступний етап",
     formTitle: "Нове замовлення",
     formSubtitle: "Для дзвінків, візитів або того, що пропустив інший канал.",
-    fCategory: "Категорія",
     fCustomer: "Ім'я клієнта *",
     fCustomerPh: "Для кого це замовлення?",
     fContact: "Контакт",
@@ -131,7 +128,11 @@ export const STR = {
     copied: "Скопійовано",
     done: "Готово",
     stageNewLead: "Новий лід",
-    stageQualifying: "Кваліфікація",
+    stageCold: "Холодні · є питання",
+    stageWarm: "Теплі · щось заважає",
+    clientBlocker: "Питання / що заважає",
+    clientBlockerPh: "Напр.: сумнівається щодо мінімального замовлення; чекає на узгодження з партнером",
+    clientBlockerSave: "Зберегти",
     stageMenuSent: "Надіслано меню",
     stageFirstOrder: "Перше замовлення",
     stageRecurring: "Постійний клієнт",
@@ -207,7 +208,6 @@ export const STR = {
     statActive: "Active orders",
     statDeposit: "Awaiting deposit",
     statValue: "Pipeline value",
-    filterAll: "All orders",
     colPendingReview: "Pending review",
     colNew: "New inquiry",
     colConfirmed: "Confirmed",
@@ -227,7 +227,6 @@ export const STR = {
     advance: "Advance status",
     formTitle: "New order",
     formSubtitle: "For phone orders, walk-ins, or anything a channel missed.",
-    fCategory: "Category",
     fCustomer: "Customer name *",
     fCustomerPh: "Who is this order for?",
     fContact: "Contact",
@@ -311,7 +310,11 @@ export const STR = {
     copied: "Copied",
     done: "Done",
     stageNewLead: "New lead",
-    stageQualifying: "Qualifying",
+    stageCold: "Cold · has questions",
+    stageWarm: "Warm · something blocking",
+    clientBlocker: "Questions / what's blocking",
+    clientBlockerPh: "e.g. unsure about the minimum order; waiting on a partner to agree",
+    clientBlockerSave: "Save",
     stageMenuSent: "Menu sent",
     stageFirstOrder: "First order",
     stageRecurring: "Recurring client",
@@ -374,11 +377,6 @@ export const STR = {
   },
 } as const;
 
-export const CATEGORY_LABEL: Record<Lang, Record<OrderCategory, string>> = {
-  uk: { b2c: "B2C", b2b: "B2B", standard_line: "Стандартна лінійка" },
-  en: { b2c: "B2C", b2b: "B2B", standard_line: "Standard line" },
-};
-
 export const SOURCE_LABEL: Record<Lang, Record<OrderSource, string>> = {
   uk: { telegram: "Telegram", website_form: "Сайт", manual: "Вручну" },
   en: { telegram: "Telegram", website_form: "Website", manual: "Manual" },
@@ -388,12 +386,6 @@ export const SOURCE_DOT: Record<OrderSource, string> = {
   telegram: "bg-sky-500",
   website_form: "bg-emerald-600",
   manual: "bg-stone-400",
-};
-
-export const CATEGORY_BADGE: Record<OrderCategory, string> = {
-  b2c: "bg-amber-100 text-amber-900",
-  b2b: "bg-stone-800 text-white",
-  standard_line: "bg-rose-100 text-rose-900",
 };
 
 export const CLIENT_STATUS_BADGE: Record<ClientStatus, string> = {
@@ -436,10 +428,11 @@ export const PENDING_REPLY_STATUS_KEY: Record<
 
 export const PIPELINE_STAGE_KEY: Record<
   PipelineStage,
-  "stageNewLead" | "stageQualifying" | "stageMenuSent" | "stageFirstOrder" | "stageRecurring" | "stageDormant"
+  "stageNewLead" | "stageCold" | "stageWarm" | "stageMenuSent" | "stageFirstOrder" | "stageRecurring" | "stageDormant"
 > = {
   new_lead: "stageNewLead",
-  qualifying: "stageQualifying",
+  cold: "stageCold",
+  warm: "stageWarm",
   menu_sent: "stageMenuSent",
   first_order: "stageFirstOrder",
   recurring: "stageRecurring",
@@ -448,7 +441,8 @@ export const PIPELINE_STAGE_KEY: Record<
 
 export const PIPELINE_STAGE_BADGE: Record<PipelineStage, string> = {
   new_lead: "bg-stone-200 text-stone-600",
-  qualifying: "bg-sky-100 text-sky-900",
+  cold: "bg-sky-100 text-sky-900",
+  warm: "bg-orange-100 text-orange-900",
   menu_sent: "bg-amber-100 text-amber-900",
   first_order: "bg-violet-100 text-violet-900",
   recurring: "bg-emerald-100 text-emerald-900",

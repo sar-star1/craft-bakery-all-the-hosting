@@ -61,6 +61,22 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "classify_lead",
+    description:
+      "For a client who has NOT ordered yet: record whether they are cold (unsure, has questions or concerns) or warm (wants to order but something is blocking them), and what exactly the question or blocker is. Updates their funnel stage and the note admins see. Call again whenever it changes. Not for clients who already ordered.",
+    input_schema: {
+      type: "object",
+      properties: {
+        temperature: { type: "string", enum: ["cold", "warm"] },
+        blocker: {
+          type: "string",
+          description: "Short, concrete note in Ukrainian: their open question/concern (cold) or what holds them back (warm)",
+        },
+      },
+      required: ["temperature", "blocker"],
+    },
+  },
+  {
     name: "send_menu_link",
     description:
       "Get this client's personal ordering-page link. Orders are placed on the website, not in chat — use this whenever they want to order or see the current menu, and include the returned URL in your reply.",
@@ -79,7 +95,7 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
   {
     name: "flag_mass_order",
     description:
-      "Call immediately when the client mentions bulk/mass ordering, the standardized product line (СТАНДАРТИЗОВАНА ЛІНІЙКА), or volumes far beyond a normal cafe order. Notifies the admin; the conversation then requires human approval.",
+      "Call immediately when the client mentions bulk/mass ordering or volumes far beyond a normal cafe order. Notifies the admin; the conversation then requires human approval.",
     input_schema: {
       type: "object",
       properties: { matched_text: { type: "string", description: "The client's words that triggered this" } },
@@ -164,7 +180,7 @@ export async function runTool(name: string, input: unknown, ctx: ToolContext): P
       const [{ data: row }, { data: orders }] = await Promise.all([
         supabase
           .from("clients")
-          .select("business_name, contact_name, pipeline_stage, standing_order_notes, last_contact_at, last_order_at")
+          .select("business_name, contact_name, pipeline_stage, blocker_note, standing_order_notes, last_contact_at, last_order_at")
           .eq("id", client.id)
           .single(),
         supabase
@@ -192,11 +208,22 @@ export async function runTool(name: string, input: unknown, ctx: ToolContext): P
         return "The ordering link is unavailable right now. Tell the client you'll send it shortly.";
       }
       flags.menuLinkSent = true;
-      if (client.pipeline_stage === "new_lead" || client.pipeline_stage === "qualifying") {
+      if (client.pipeline_stage === "new_lead") {
         await supabase.from("clients").update({ pipeline_stage: "menu_sent" }).eq("id", client.id);
         client.pipeline_stage = "menu_sent";
       }
       return `Personal ordering link (include exactly as-is): ${link}`;
+    }
+
+    case "classify_lead": {
+      if (!["new_lead", "cold", "warm", "menu_sent"].includes(client.pipeline_stage)) {
+        return "This client has already ordered; lead classification does not apply.";
+      }
+      const temperature = args.temperature === "warm" ? "warm" : "cold";
+      const blocker = String(args.blocker ?? "").trim().slice(0, 500) || null;
+      await supabase.from("clients").update({ pipeline_stage: temperature, blocker_note: blocker }).eq("id", client.id);
+      client.pipeline_stage = temperature;
+      return "Saved.";
     }
 
     case "propose_confirmation": {

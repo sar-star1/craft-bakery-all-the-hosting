@@ -21,6 +21,11 @@ function ClientCard({ client, lang }: { client: Client; lang: Lang }) {
         {client.business_name}
       </p>
       <p className="text-[13px] text-stone-500 mt-0.5 truncate">{client.contact_name ?? "—"}</p>
+      {client.blocker_note && (client.pipeline_stage === "cold" || client.pipeline_stage === "warm") && (
+        <p className="text-[12px] text-stone-600 mt-2 leading-snug line-clamp-3 bg-stone-50 rounded px-2 py-1.5">
+          {client.blocker_note}
+        </p>
+      )}
       <div className="flex items-center justify-between mt-3 pt-3 border-t border-stone-100">
         <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${CLIENT_STATUS_BADGE[client.status]}`}>
           {t[CLIENT_STATUS_KEY[client.status]]}
@@ -70,7 +75,7 @@ export default function ClientsList({
           </button>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-7 gap-4">
           {PIPELINE_STAGES.map((stage) => {
             const stageClients = clients.filter((c) => c.pipeline_stage === stage);
             return (

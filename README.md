@@ -56,8 +56,10 @@ until real credentials are configured — see Setup below.
 - **Orders** (`/`): kanban — Pending review → New → Confirmed → In progress
   → Ready → Completed, filterable by category, manual entry, stats bar.
   Website orders show their itemised cart, address and contact in the panel.
-- **Clients** (`/clients`): B2B funnel kanban (New lead → Qualifying → Menu
-  sent → First order → Recurring → Dormant); detail page with the Telegram
+- **Clients** (`/clients`): B2B funnel kanban (New lead → Cold · has questions /
+  Warm · something blocking → Menu sent → First order → Recurring → Dormant).
+  The agent classifies leads itself and records the specific question or
+  blocker, which shows on the card and can be edited by hand; detail page with the Telegram
   conversation, standing order notes, order history, the client's personal
   ordering link, and any pending drafts.
 - **Pending Replies** (`/pending-replies`): every message awaiting approval,
