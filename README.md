@@ -81,6 +81,24 @@ until real credentials are configured — see Setup below.
   re-engagement, both drafted into Pending Replies for approval.
 - uk/en toggle throughout (uk default).
 
+## Working from the admin Telegram group
+
+The group is actionable, so day-to-day approvals don't need the dashboard:
+
+- Every draft alert shows the client's message and the draft, with **✅ Надіслати**
+  and **🚫 Відхилити** buttons. Replying to the alert with your own text sends
+  that text to the client instead.
+- Website orders get a one-tap **Перевірено / Підтвердити** button.
+- Whoever acts is written onto the alert and the buttons disappear, so everyone
+  sees it is handled. Approving is atomic: two admins pressing at once can't
+  double-send.
+- Anyone in the group can act, so keep the group's membership to staff only.
+  The bot ignores button presses from any other chat.
+- Batch jobs post the first 15 drafts individually, then a summary.
+
+Re-register the webhook after upgrading (`scripts/telegram-setup.mjs webhook …`)
+so Telegram also delivers button presses.
+
 ## Approval policy (`lib/agent/policy.ts`)
 
 A reply to a client who just wrote in auto-sends only when it is routine:

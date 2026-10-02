@@ -144,6 +144,7 @@ create table pending_replies (
     check (reply_type in ('order_flow', 'weekly_reminder', 'remarketing', 'seasonal_offer')),
   status text not null default 'awaiting_approval'
     check (status in ('awaiting_approval', 'approved_sent', 'rejected')),
+  admin_message_id bigint,   -- the alert in the admin Telegram group (buttons + reply-to-edit)
   created_at timestamptz default now()
 );
 
@@ -168,6 +169,7 @@ create index clients_pipeline_stage_idx on clients(pipeline_stage);
 create index conversations_client_idx on conversations(client_id);
 create index mass_order_flags_resolved_idx on mass_order_flags(resolved);
 create index pending_replies_status_idx on pending_replies(status);
+create index pending_replies_admin_message_idx on pending_replies(admin_message_id) where admin_message_id is not null;
 create index messages_client_idx on messages(client_id, created_at desc);
 -- Telegram can redeliver an update; this makes replays a no-op.
 create unique index messages_incoming_dedupe_idx

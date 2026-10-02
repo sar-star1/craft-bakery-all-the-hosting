@@ -111,7 +111,9 @@ export async function submitWebsiteOrder(input: SubmitOrderInput): Promise<Submi
   const needsReview = !clientId || total < MIN_ORDER_TOTAL_UAH;
 
   const summary = lines.map((l) => `${l.name} ×${l.qty}`).join(", ");
-  const { error } = await supabase.from("orders").insert({
+  const { data: inserted, error } = await supabase
+    .from("orders")
+    .insert({
     client_id: clientId,
     source: "website_form",
     customer_name: data.customer_name,
@@ -127,8 +129,10 @@ export async function submitWebsiteOrder(input: SubmitOrderInput): Promise<Submi
     status: needsReview ? "pending_review" : "new",
     deposit_status: "n/a",
     total_amount: total,
-  });
-  if (error) return { ok: false, error: "save_failed" };
+  })
+    .select("id")
+    .single();
+  if (error || !inserted) return { ok: false, error: "save_failed" };
 
   if (clientId && client) {
     await supabase
@@ -143,14 +147,23 @@ export async function submitWebsiteOrder(input: SubmitOrderInput): Promise<Submi
 
   if (isTelegramConfigured()) {
     const base = process.env.SITE_URL?.replace(/\/$/, "");
+    const status = needsReview ? "pending_review" : "new";
     await notifyAdmin(
       [
         `Нове замовлення з сайту: ${data.customer_name} · ${total} ₴`,
+        summary.length > 300 ? `${summary.slice(0, 297)}...` : summary,
+        data.address,
+        data.phone,
         needsReview ? "Потребує перевірки (немає прив'язки до клієнта або сума менша за мінімум)." : "",
-        base ? `${base}/` : "",
       ]
         .filter(Boolean)
-        .join("\n")
+        .join("\n"),
+      {
+        buttons: [
+          [{ text: needsReview ? "👍 Перевірено" : "✅ Підтвердити", callback_data: `os:${inserted.id}:${status}` }],
+          ...(base ? [[{ text: "Відкрити в дашборді", url: `${base}/` }]] : []),
+        ],
+      }
     );
   }
 
