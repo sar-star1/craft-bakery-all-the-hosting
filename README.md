@@ -38,7 +38,8 @@ until real credentials are configured — see Setup below.
      server-only code; see `lib/supabase/server.ts`)
    - `TELEGRAM_BOT_TOKEN` + `TELEGRAM_BOT_USERNAME` + `TELEGRAM_ADMIN_GROUP_ID`
      (standard Bot API bot from @BotFather — not Telegram Business Connection)
-   - `ANTHROPIC_API_KEY`, `SITE_URL`, `TELEGRAM_WEBHOOK_SECRET`, `CRON_SECRET`
+   - `ANTHROPIC_API_KEY`, `SITE_URL`, `TELEGRAM_WEBHOOK_SECRET`, `CRON_SECRET`,
+     `DASHBOARD_PASSWORD`
      (see `.env.local.example` and "Going live" below)
 
 4. **Run the dev server**:
@@ -122,8 +123,11 @@ waits in Pending Replies.
 5. **Deploy**: push to GitHub, import the repo in Vercel, add every variable
    from `.env.local.example` (including `SITE_URL` = the production URL) in
    Project Settings → Environment Variables, deploy.
-6. **Register the webhook**:
-   `node --env-file=.env.local scripts/telegram-setup.mjs webhook https://<your-domain>`
+6. **Register the webhook**: open `/setup` in the dashboard and press
+   "Зареєструвати вебхук" — the token never leaves the server. (The CLI
+   `scripts/telegram-setup.mjs webhook …` still works.) In the admin group, send
+   `/chatid` to get the group's ID for `TELEGRAM_ADMIN_GROUP_ID`. `/setup` also
+   checks every variable, the database, the webhook, the group and the AI model.
 7. **Seed operating data**: add rows to `capacity_rules` (Supabase table
    editor) — the agent makes no capacity or lead-time claim without them.
    Optional tunables in the same table: `remarketing_threshold_days`
@@ -137,8 +141,10 @@ waits in Pending Replies.
 - Historical Telegram import (Desktop export → `clients` rows) — deferred
   until the core system is confirmed working.
 - Instagram DM handling (the bot already accepts `?start=ig` for leads).
-- Auth in front of the dashboard: it has none, so restrict access (Vercel
-  password protection or an auth layer) before real client data goes in.
+- Per-user accounts: the dashboard has one shared password (`DASHBOARD_PASSWORD`).
+  Everything except `/order`, the Telegram webhook and the cron routes is behind
+  it, and every dashboard action re-checks the session. With Supabase configured
+  and no password set, the dashboard locks itself.
 - Re-hosting menu photos in the `menu-photos` bucket (they currently hotlink
   to the old site's CDN).
 

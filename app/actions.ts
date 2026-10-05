@@ -4,6 +4,7 @@ import { after } from "next/server";
 import { revalidatePath } from "next/cache";
 import { createSeasonalOfferDrafts, type OfferSegment } from "@/lib/jobs";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { requireAdmin } from "@/lib/auth";
 import { rejectPendingReply as rejectReply, sendPendingReply } from "@/lib/replies";
 import { getBotDeepLink } from "@/lib/telegram";
 import {
@@ -24,6 +25,7 @@ export async function createOrder(
   _prevState: CreateOrderState,
   formData: FormData
 ): Promise<CreateOrderState> {
+  await requireAdmin();
   const customerName = String(formData.get("customer_name") ?? "").trim();
   const customerContact = String(formData.get("customer_contact") ?? "").trim();
   const itemSummary = String(formData.get("item_summary_uk") ?? "").trim();
@@ -58,6 +60,7 @@ export async function createOrder(
 }
 
 export async function advanceOrderStatus(id: string, currentStatus: OrderStatus) {
+  await requireAdmin();
   const supabase = createSupabaseServerClient();
   const { error } = await supabase
     .from("orders")
@@ -69,6 +72,7 @@ export async function advanceOrderStatus(id: string, currentStatus: OrderStatus)
 }
 
 export async function revertOrderStatus(id: string, currentStatus: OrderStatus) {
+  await requireAdmin();
   const supabase = createSupabaseServerClient();
   const { error } = await supabase
     .from("orders")
@@ -84,11 +88,13 @@ export interface PendingReplyActionState {
 }
 
 export async function approvePendingReply(id: string): Promise<PendingReplyActionState> {
+  await requireAdmin();
   const result = await sendPendingReply(id);
   return result.ok ? {} : { error: result.error };
 }
 
 export async function rejectPendingReply(id: string): Promise<PendingReplyActionState> {
+  await requireAdmin();
   const result = await rejectReply(id);
   return result.ok ? {} : { error: result.error };
 }
@@ -103,6 +109,7 @@ export async function createClient(
   _prevState: CreateClientState,
   formData: FormData
 ): Promise<CreateClientState> {
+  await requireAdmin();
   const businessName = String(formData.get("business_name") ?? "").trim();
   const contactName = String(formData.get("contact_name") ?? "").trim();
   const standingOrderNotes = String(formData.get("standing_order_notes") ?? "").trim();
@@ -136,6 +143,7 @@ export async function createClient(
 }
 
 export async function updateClientPipelineStage(id: string, stage: PipelineStage) {
+  await requireAdmin();
   const supabase = createSupabaseServerClient();
   const { error } = await supabase.from("clients").update({ pipeline_stage: stage }).eq("id", id);
   if (error) throw new Error(error.message);
@@ -144,6 +152,7 @@ export async function updateClientPipelineStage(id: string, stage: PipelineStage
 }
 
 export async function updateClientBlockerNote(id: string, note: string) {
+  await requireAdmin();
   const supabase = createSupabaseServerClient();
   const { error } = await supabase
     .from("clients")
@@ -165,6 +174,7 @@ export async function saveMenuItem(
   _prevState: SaveMenuItemState,
   formData: FormData
 ): Promise<SaveMenuItemState> {
+  await requireAdmin();
   const id = String(formData.get("id") ?? "").trim() || null;
   const categoryId = String(formData.get("category_id") ?? "").trim();
   const nameUk = String(formData.get("name_uk") ?? "").trim();
@@ -230,6 +240,7 @@ export async function saveMenuItem(
 }
 
 export async function deleteMenuItem(id: string) {
+  await requireAdmin();
   const supabase = createSupabaseServerClient();
   const { error } = await supabase.from("menu_items").delete().eq("id", id);
   if (error) throw new Error(error.message);
@@ -244,6 +255,7 @@ export async function saveMenuCategory(
   _prevState: SaveMenuCategoryState,
   formData: FormData
 ): Promise<SaveMenuCategoryState> {
+  await requireAdmin();
   const id = String(formData.get("id") ?? "").trim() || null;
   const nameUk = String(formData.get("name_uk") ?? "").trim();
   const nameEn = String(formData.get("name_en") ?? "").trim();
@@ -276,6 +288,7 @@ export async function saveMenuCategory(
 }
 
 export async function deleteMenuCategory(id: string) {
+  await requireAdmin();
   const supabase = createSupabaseServerClient();
   const { error } = await supabase.from("menu_categories").delete().eq("id", id);
   if (error) throw new Error(error.message);
@@ -290,6 +303,7 @@ export async function saveSiteContent(
   _prevState: SaveSiteContentState,
   formData: FormData
 ): Promise<SaveSiteContentState> {
+  await requireAdmin();
   const key = String(formData.get("key") ?? "").trim();
   const contentUk = String(formData.get("content_uk") ?? "").trim();
   const contentEn = String(formData.get("content_en") ?? "").trim();
@@ -307,6 +321,7 @@ export async function saveSiteContent(
 }
 
 export async function deleteSiteContent(key: string) {
+  await requireAdmin();
   const supabase = createSupabaseServerClient();
   const { error } = await supabase.from("site_content").delete().eq("key", key);
   if (error) throw new Error(error.message);
@@ -325,6 +340,7 @@ export async function startSeasonalOffer(
   _prev: SeasonalOfferState,
   formData: FormData
 ): Promise<SeasonalOfferState> {
+  await requireAdmin();
   const offer = String(formData.get("offer") ?? "").trim();
   const segment = String(formData.get("segment") ?? "all") as OfferSegment;
   if (!offer) return { error: "offerRequired" };
