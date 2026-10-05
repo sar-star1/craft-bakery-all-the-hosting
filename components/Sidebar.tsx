@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { Lang } from "@/lib/i18n";
 import { STR } from "@/lib/i18n";
+import { logout } from "@/app/auth-actions";
 import LangToggle from "./LangToggle";
 
 export default function Sidebar({
@@ -19,6 +20,7 @@ export default function Sidebar({
   const isClients = pathname.startsWith("/clients");
   const isPendingReplies = pathname.startsWith("/pending-replies");
   const isMenu = pathname.startsWith("/menu");
+  const isSetup = pathname.startsWith("/setup");
 
   return (
     <aside className="w-56 shrink-0 border-r border-stone-200 bg-white/60 px-5 py-6 hidden md:flex md:flex-col">
@@ -63,10 +65,18 @@ export default function Sidebar({
         <span className="block px-3 py-1.5 rounded text-stone-300 cursor-default">
           {t.navCalendar}
         </span>
-        <span className="block px-3 py-1.5 rounded text-stone-300 cursor-default">
+        <Link
+          href="/setup"
+          className={`block px-3 py-1.5 rounded ${
+            isSetup ? "bg-stone-900 text-white" : "text-stone-500 hover:bg-stone-100"
+          }`}
+        >
           {t.navSettings}
-        </span>
+        </Link>
       </nav>
+      <form action={logout} className="mt-auto pt-6">
+        <button className="text-[12px] text-stone-400 hover:text-stone-700">Вийти</button>
+      </form>
     </aside>
   );
 }

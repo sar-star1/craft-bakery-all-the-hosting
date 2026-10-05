@@ -86,6 +86,27 @@ export async function notifyAdmin(
   return sendTelegramMessage(groupId, text, opts);
 }
 
+// Raw Bot API call for the setup page; returns Telegram's `result` or an error.
+export async function telegramApi<T = unknown>(
+  method: string,
+  body?: Record<string, unknown>
+): Promise<{ ok: true; result: T } | { ok: false; error: string }> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return { ok: false, error: "TELEGRAM_BOT_TOKEN is not set." };
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body ?? {}),
+      cache: "no-store",
+    });
+    const json = await res.json();
+    return json.ok ? { ok: true, result: json.result as T } : { ok: false, error: json.description ?? "Telegram API error" };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 // Migration deep links (t.me/<bot>?start=<payload>). Telegram's start
 // payload only allows [A-Za-z0-9_-], so we strip the client UUID's dashes
 // rather than add a separate token column.

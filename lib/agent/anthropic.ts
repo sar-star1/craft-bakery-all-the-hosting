@@ -5,7 +5,7 @@ export function isAnthropicConfigured() {
   return Boolean(process.env.ANTHROPIC_API_KEY);
 }
 
-export const AGENT_MODEL = process.env.ANTHROPIC_MODEL || "claude-opus-5";
+export const AGENT_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-5-5";
 
 let client: Anthropic | null = null;
 export function getAnthropic(): Anthropic {

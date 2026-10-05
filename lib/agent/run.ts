@@ -60,6 +60,13 @@ export async function processTelegramUpdate(update: TelegramUpdate): Promise<voi
   }
 
   const msg = update.message;
+  // /chatid in any group replies with that group's id — how the admin group's
+  // TELEGRAM_ADMIN_GROUP_ID is found without touching the Bot API by hand.
+  if (msg && msg.chat.type !== "private" && /^\/chatid(@\w+)?(\s|$)/.test(msg.text ?? "")) {
+    await sendTelegramMessage(String(msg.chat.id), `ID цього чату: ${msg.chat.id}`);
+    return;
+  }
+
   // Only 1:1 chats with clients. The admin group and channels are ignored.
   if (!msg || msg.chat.type !== "private" || msg.from?.is_bot) return;
 
