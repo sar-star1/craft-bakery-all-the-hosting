@@ -24,6 +24,8 @@ export interface OrderDetails {
   address?: string;
   email?: string;
   phone?: string;
+  // Whether the order form carried a personal-link token (diagnostic only).
+  ref_received?: boolean;
 }
 
 export interface Order {

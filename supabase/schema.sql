@@ -148,6 +148,16 @@ create table pending_replies (
   created_at timestamptz default now()
 );
 
+-- Standing instructions for the agent, appended to every prompt it runs on.
+-- Added from the dashboard (Settings) or learned from admin feedback in the group.
+create table agent_guidelines (
+  id uuid primary key default gen_random_uuid(),
+  text text not null,
+  active boolean not null default true,
+  source text not null default 'manual' check (source in ('manual', 'admin_feedback')),
+  created_at timestamptz default now()
+);
+
 -- Conversation log. Not in the original spec, but the agent is stateless
 -- (Claude sees only what we send it), so every incoming/outgoing Telegram
 -- message is stored here and replayed as history. Also what the client
@@ -193,6 +203,7 @@ alter table capacity_rules enable row level security;
 alter table mass_order_flags enable row level security;
 alter table pending_replies enable row level security;
 alter table messages enable row level security;
+alter table agent_guidelines enable row level security;
 
 -- Public bucket for menu photos — served directly by Supabase's CDN, no
 -- signed URLs needed since these are just product photos, not sensitive.

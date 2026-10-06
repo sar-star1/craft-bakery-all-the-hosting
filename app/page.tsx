@@ -1,5 +1,6 @@
 import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import type { Order } from "@/lib/types";
+import { mockClients } from "@/lib/mockClients";
 import { mockOrders } from "@/lib/mockOrders";
 import Dashboard from "@/components/Dashboard";
 
@@ -20,18 +21,23 @@ export default async function Page() {
   // Supabase isn't configured yet — fall back to sample data so the
   // dashboard is testable before real credentials exist (see README).
   if (!isSupabaseConfigured()) {
-    return <Dashboard initialOrders={mockOrders} sampleMode />;
+    return <Dashboard initialOrders={mockOrders} clients={mockClients} sampleMode />;
   }
 
   const supabase = createSupabaseServerClient();
-  const { data, error } = await supabase
-    .from("orders")
-    .select("*")
-    .order("created_at", { ascending: false });
+  const [{ data, error }, { data: clients }] = await Promise.all([
+    supabase.from("orders").select("*").order("created_at", { ascending: false }),
+    supabase.from("clients").select("id, business_name").order("business_name"),
+  ]);
 
   if (error) {
     return <ErrorScreen message={error.message} />;
   }
 
-  return <Dashboard initialOrders={(data ?? []) as Order[]} />;
+  return (
+    <Dashboard
+      initialOrders={(data ?? []) as Order[]}
+      clients={(clients ?? []) as { id: string; business_name: string }[]}
+    />
+  );
 }

@@ -40,6 +40,14 @@ const checkoutSchema = z.object({
 
 type CartMap = Record<string, number>;
 
+function readStoredRef(): string | undefined {
+  try {
+    return localStorage.getItem("bakery_ref") ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export default function Storefront({
   data,
   refToken,
@@ -69,6 +77,15 @@ export default function Storefront({
   // Radix portals (dialogs, sheets, toasts) render on <body>, outside the
   // page wrapper — the theme's CSS variables are scoped to `.storefront`,
   // so mark <body> too while this page is mounted.
+  // Remember the personal-link token on this device, so an order placed after the
+  // link's ?ref is lost (reload, opening /order directly) is still attributed.
+  useEffect(() => {
+    if (!refToken) return;
+    try {
+      localStorage.setItem("bakery_ref", refToken);
+    } catch {}
+  }, [refToken]);
+
   useEffect(() => {
     document.body.classList.add("storefront");
     return () => document.body.classList.remove("storefront");
@@ -179,7 +196,7 @@ export default function Storefront({
       result = sampleMode
         ? { ok: true }
         : await submitWebsiteOrder({
-            ref: refToken,
+            ref: refToken ?? readStoredRef(),
             ...parsed.data,
             lines: cartLines.map((l) => ({ item_id: l.id, qty: l.qty })),
           });

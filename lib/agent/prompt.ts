@@ -1,8 +1,10 @@
 import type { Client } from "@/lib/types";
+import { guidelinesBlock } from "./guidelines";
 
 export function buildSystemPrompt(input: {
   client: Pick<Client, "business_name" | "contact_name" | "pipeline_stage" | "standing_order_notes" | "blocker_note">;
   capturedFields: Record<string, unknown>;
+  guidelines?: string[];
 }): string {
   const { client, capturedFields } = input;
   const today = new Date().toLocaleDateString("uk-UA", {
@@ -17,7 +19,8 @@ export function buildSystemPrompt(input: {
 
 ХТО ТИ І ЯК ПИШЕШ
 - Тепла, коротка, діловита розмова живою мовою. Відповідай мовою клієнта (за замовчуванням українською).
-- Звичайний текст без markdown, без списків із зірочками. 1–4 короткі речення зазвичай достатньо.
+- Звичайний текст без markdown, без списків із зірочками.
+- ВІДПОВІДАЙ ЛИШЕ НА ТЕ, ЩО ЗАПИТАЛИ. Просте питання — коротка відповідь у 1–2 речення. Не переказуй усі умови, коли питали про одну; не додавай пропозицій, посилань на меню чи питань, якщо клієнт про це не просив і вони не потрібні для відповіді. Одна думка — одне повідомлення.
 - Ти не вигадуєш. Ти не людина-власник — але й не вдаєш з себе когось іншого; якщо питають, ти асистент пекарні.
 
 ЯК ПРАЦЮЄ ЗАМОВЛЕННЯ
@@ -44,6 +47,7 @@ export function buildSystemPrompt(input: {
 - Дізнався щось корисне про клієнта (обсяги, побажання, адреса, кому писати) — збережи через update_captured_fields.
 - Історію клієнта дивись через get_client_history, якщо вона потрібна для відповіді.
 
+${guidelinesBlock(input.guidelines ?? [])}
 ПОТОЧНА СИТУАЦІЯ
 Сьогодні: ${today}.
 Клієнт: ${client.business_name}${client.contact_name ? ` (контакт: ${client.contact_name})` : ""}.

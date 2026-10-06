@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import type { Lang } from "@/lib/i18n";
 import { SOURCE_DOT, SOURCE_LABEL, STR } from "@/lib/i18n";
 import { STATUS_COLUMNS, type Order } from "@/lib/types";
@@ -11,13 +12,18 @@ export default function DetailPanel({
   onClose,
   onAdvance,
   onBack,
+  clients,
+  onLink,
 }: {
   order: Order | null;
   lang: Lang;
   onClose: () => void;
   onAdvance: (id: string) => void;
   onBack: (id: string) => void;
+  clients: { id: string; business_name: string }[];
+  onLink: (orderId: string, clientId: string) => void;
 }) {
+  const [pick, setPick] = useState("");
   if (!order) return null;
   const t = STR[lang];
   const itemSummary = lang === "en" ? order.item_summary_en ?? order.item_summary_uk : order.item_summary_uk;
@@ -92,6 +98,42 @@ export default function DetailPanel({
               </ul>
             </div>
           )}
+          <div>
+            <p className="text-stone-400 text-[11px] uppercase tracking-wide mb-1">{t.orderClient}</p>
+            {order.client_id ? (
+              <p className="text-stone-700">
+                {clients.find((c) => c.id === order.client_id)?.business_name ?? "—"}
+              </p>
+            ) : (
+              <div>
+                <p className="text-amber-700 text-[13px] mb-2">{t.orderUnlinked}</p>
+                <div className="flex gap-2">
+                  <select
+                    value={pick}
+                    onChange={(e) => setPick(e.target.value)}
+                    className="flex-1 min-w-0 border border-stone-200 rounded px-2 py-1.5 text-[13px]"
+                  >
+                    <option value="">{t.orderLinkPick}</option>
+                    {clients.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.business_name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    disabled={!pick}
+                    onClick={() => {
+                      onLink(order.id, pick);
+                      setPick("");
+                    }}
+                    className="text-[13px] bg-stone-900 text-white px-3 py-1.5 rounded hover:bg-stone-800 disabled:opacity-40"
+                  >
+                    {t.orderLinkBtn}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
           <div>
             <p className="text-stone-400 text-[11px] uppercase tracking-wide mb-1">{t.deposit}</p>
             <p className="text-stone-700">

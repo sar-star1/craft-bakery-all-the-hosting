@@ -1,7 +1,14 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { registerTelegramWebhook, sendAdminTestMessage, testAnthropic, type SetupActionResult } from "@/app/setup-actions";
+import {
+  addAgentRule,
+  deleteAgentRule,
+  registerTelegramWebhook,
+  sendAdminTestMessage,
+  testAnthropic,
+  type SetupActionResult,
+} from "@/app/setup-actions";
 import type { Lang } from "@/lib/i18n";
 import Sidebar from "./Sidebar";
 import LangToggle from "./LangToggle";
@@ -14,6 +21,7 @@ export interface SetupStatus {
     | { ok: true; categories: number; items: number; clients: number; capacityRules: number }
     | { ok: false; error: string }
     | null;
+  rules: { id: string; text: string; source: string }[];
   telegram:
     | { ok: true; username: string; webhookUrl: string | null; pending: number; lastError: string | null }
     | { ok: false; error: string }
@@ -69,6 +77,64 @@ function SecretGenerator() {
         </p>
       )}
     </div>
+  );
+}
+
+function AgentRules({ rules }: { rules: SetupStatus["rules"] }) {
+  const [text, setText] = useState("");
+  const [msg, setMsg] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+  const run = (fn: () => Promise<SetupActionResult>, after?: () => void) =>
+    startTransition(async () => {
+      const res = await fn();
+      setMsg(res.message);
+      if (res.ok) after?.();
+    });
+  return (
+    <>
+      <p className="text-[12px] text-stone-500 mb-3">
+        Правила діють у кожній відповіді агента та в чернетках нагадувань. Їх можна додати тут або прямо з адмін-групи:
+        відповісти на чернетку зауваженням — агент перепише її і збереже загальне зауваження як правило.
+      </p>
+      {rules.length === 0 ? (
+        <p className="text-sm text-stone-400 mb-3">Правил поки немає.</p>
+      ) : (
+        <ul className="space-y-1.5 mb-3">
+          {rules.map((r) => (
+            <li key={r.id} className="flex items-start gap-2 text-sm">
+              <span className="flex-1 text-stone-700">
+                {r.text}
+                {r.source === "admin_feedback" && <span className="text-stone-400 text-[11px]"> · з групи</span>}
+              </span>
+              <button
+                disabled={pending}
+                onClick={() => run(() => deleteAgentRule(r.id))}
+                className="text-[12px] text-stone-400 hover:text-rose-700 shrink-0"
+              >
+                Видалити
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="flex gap-2">
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          maxLength={400}
+          placeholder="Напр.: Не пропонуй знижок. Відповідай одним реченням, якщо питання просте."
+          className="flex-1 min-w-0 border border-stone-200 rounded px-3 py-1.5 text-sm"
+        />
+        <button
+          disabled={pending || !text.trim()}
+          onClick={() => run(() => addAgentRule(text), () => setText(""))}
+          className="text-[13px] bg-stone-900 text-white px-3 py-1.5 rounded hover:bg-stone-800 disabled:opacity-50"
+        >
+          Додати
+        </button>
+      </div>
+      {msg && <p className="text-[12px] mt-1.5 text-stone-600">{msg}</p>}
+    </>
   );
 }
 
@@ -159,7 +225,12 @@ export default function SetupPanel({ status }: { status: SetupStatus }) {
         </section>
 
         <section className="bg-white rounded-md border border-stone-200 p-4 mb-5">
-          <h2 className="font-serif text-lg mb-2">5. AI-агент</h2>
+          <h2 className="font-serif text-lg mb-2">5. Правила для агента</h2>
+          <AgentRules rules={status.rules} />
+        </section>
+
+        <section className="bg-white rounded-md border border-stone-200 p-4 mb-5">
+          <h2 className="font-serif text-lg mb-2">6. AI-агент</h2>
           <Row ok={envSet("ANTHROPIC_API_KEY")}>
             Модель: <code className="text-[12px]">{status.model}</code>
           </Row>

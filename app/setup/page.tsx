@@ -25,6 +25,7 @@ export default async function SetupPage() {
     siteUrl: process.env.SITE_URL?.replace(/\/$/, "") ?? null,
     supabase: null,
     telegram: null,
+    rules: [],
   };
 
   if (isSupabaseConfigured()) {
@@ -44,6 +45,12 @@ export default async function SetupPage() {
         count("capacity_rules"),
       ]);
       status.supabase = { ok: true, categories, items, clients, capacityRules };
+      const { data: rules } = await db
+        .from("agent_guidelines")
+        .select("id, text, source")
+        .eq("active", true)
+        .order("created_at", { ascending: true });
+      status.rules = (rules ?? []) as SetupStatus["rules"];
     } catch (err) {
       status.supabase = { ok: false, error: err instanceof Error ? err.message : String(err) };
     }

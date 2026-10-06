@@ -6,6 +6,7 @@ import { handleAdminUpdate } from "@/lib/adminBot";
 import { notifyAdmin, sendTelegramMessage, sendTypingAction, startPayloadToClientId } from "@/lib/telegram";
 import type { ClientSource, PipelineStage } from "@/lib/types";
 import { AGENT_MODEL, getAnthropic, isAnthropicConfigured } from "./anthropic";
+import { getActiveGuidelines } from "./guidelines";
 import { decideOrderFlowReply, type TurnFlags } from "./policy";
 import { buildSystemPrompt } from "./prompt";
 import { AGENT_TOOLS, runTool, type ToolContext } from "./tools";
@@ -316,7 +317,7 @@ async function runAgent(
     .map((m) => ({ role: m.direction === "in" ? ("user" as const) : ("assistant" as const), content: m.text as string }));
   while (messages.length > 0 && messages[0].role !== "user") messages.shift();
 
-  const system = buildSystemPrompt({ client, capturedFields });
+  const system = buildSystemPrompt({ client, capturedFields, guidelines: await getActiveGuidelines(db) });
   const anthropic = getAnthropic();
 
   for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {

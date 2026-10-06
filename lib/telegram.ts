@@ -13,7 +13,7 @@ export interface InlineButton {
 export async function sendTelegramMessage(
   chatId: string,
   text: string,
-  opts?: { buttons?: InlineButton[][] }
+  opts?: { buttons?: InlineButton[][]; replyTo?: number }
 ): Promise<{ ok: boolean; error?: string; messageId?: number }> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) {
@@ -28,6 +28,7 @@ export async function sendTelegramMessage(
       chat_id: chatId,
       text: text.slice(0, 4096),
       ...(opts?.buttons ? { reply_markup: { inline_keyboard: opts.buttons } } : {}),
+      ...(opts?.replyTo ? { reply_parameters: { message_id: opts.replyTo, allow_sending_without_reply: true } } : {}),
     }),
   });
   const json = await res.json();
@@ -53,12 +54,12 @@ export function answerCallbackQuery(callbackQueryId: string, text?: string) {
 }
 
 // Rewrites an alert in place and removes its buttons.
-export function editTelegramMessage(chatId: string, messageId: number, text: string) {
+export function editTelegramMessage(chatId: string, messageId: number, text: string, buttons: InlineButton[][] = []) {
   return telegramCall("editMessageText", {
     chat_id: chatId,
     message_id: messageId,
     text: text.slice(0, 4096),
-    reply_markup: { inline_keyboard: [] },
+    reply_markup: { inline_keyboard: buttons },
   });
 }
 
@@ -77,7 +78,7 @@ export async function sendTypingAction(chatId: string): Promise<void> {
 // separate group, distinct from any individual client chat.
 export async function notifyAdmin(
   text: string,
-  opts?: { buttons?: InlineButton[][] }
+  opts?: { buttons?: InlineButton[][]; replyTo?: number }
 ): Promise<{ ok: boolean; error?: string; messageId?: number }> {
   const groupId = process.env.TELEGRAM_ADMIN_GROUP_ID;
   if (!groupId) {

@@ -6,7 +6,8 @@ import { refTokenToClientId } from "@/lib/clientToken";
 import { MIN_ORDER_TOTAL_UAH } from "@/lib/orderRules";
 import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { isTelegramConfigured, notifyAdmin } from "@/lib/telegram";
-import type { OrderLine, PipelineStage } from "@/lib/types";
+import { markClientOrdered } from "@/lib/orders";
+import type { OrderLine } from "@/lib/types";
 
 
 const orderSchema = z.object({
@@ -24,15 +25,6 @@ const orderSchema = z.object({
 
 export type SubmitOrderInput = z.input<typeof orderSchema>;
 export type SubmitOrderResult = { ok: true } | { ok: false; error: string; issues?: string[] };
-
-const NEXT_STAGE: Partial<Record<PipelineStage, PipelineStage>> = {
-  new_lead: "first_order",
-  cold: "first_order",
-  warm: "first_order",
-  menu_sent: "first_order",
-  first_order: "recurring",
-  dormant: "recurring",
-};
 
 // Prices are always re-read from menu_items here — the browser only ever
 // sends item ids and quantities, never trusted amounts.
@@ -97,17 +89,15 @@ export async function submitWebsiteOrder(input: SubmitOrderInput): Promise<Submi
   }
 
   let clientId: string | null = null;
-  let client: { pipeline_stage: PipelineStage } | null = null;
   const refClientId = refTokenToClientId(data.ref);
   if (refClientId) {
     const { data: row } = await supabase
       .from("clients")
-      .select("id, pipeline_stage")
+      .select("id")
       .eq("id", refClientId)
       .maybeSingle();
     if (row) {
       clientId = row.id as string;
-      client = { pipeline_stage: row.pipeline_stage as PipelineStage };
     }
   }
 
@@ -130,6 +120,7 @@ export async function submitWebsiteOrder(input: SubmitOrderInput): Promise<Submi
       address: data.address,
       email: data.email,
       phone: data.phone,
+      ref_received: Boolean(data.ref),
     },
     status: needsReview ? "pending_review" : "new",
     deposit_status: "n/a",
@@ -142,16 +133,7 @@ export async function submitWebsiteOrder(input: SubmitOrderInput): Promise<Submi
   // The order is saved. Everything below is bookkeeping and alerts: if any of it
   // fails, the customer must still see their order as accepted.
   try {
-    if (clientId && client) {
-      await supabase
-        .from("clients")
-        .update({
-          last_order_at: new Date().toISOString(),
-          status: "active",
-          pipeline_stage: NEXT_STAGE[client.pipeline_stage] ?? client.pipeline_stage,
-        })
-        .eq("id", clientId);
-    }
+    if (clientId) await markClientOrdered(supabase, clientId);
 
     if (isTelegramConfigured()) {
       const base = process.env.SITE_URL?.replace(/\/$/, "");
