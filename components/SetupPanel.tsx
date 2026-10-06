@@ -2,7 +2,10 @@
 
 import { useState, useTransition } from "react";
 import {
+  addAgentFact,
   addAgentRule,
+  deleteAgentExample,
+  deleteAgentFact,
   deleteAgentRule,
   registerTelegramWebhook,
   sendAdminTestMessage,
@@ -22,6 +25,8 @@ export interface SetupStatus {
     | { ok: false; error: string }
     | null;
   rules: { id: string; text: string; source: string }[];
+  facts: { id: string; text: string }[];
+  examples: { id: string; client_message: string; reply: string; quality: string }[];
   telegram:
     | { ok: true; username: string; webhookUrl: string | null; pending: number; lastError: string | null }
     | { ok: false; error: string }
@@ -80,7 +85,21 @@ function SecretGenerator() {
   );
 }
 
-function AgentRules({ rules }: { rules: SetupStatus["rules"] }) {
+function TeachList({
+  intro,
+  empty,
+  placeholder,
+  items,
+  onAdd,
+  onDelete,
+}: {
+  intro: string;
+  empty: string;
+  placeholder: string;
+  items: { id: string; text: string; tag?: string }[];
+  onAdd: (text: string) => Promise<SetupActionResult>;
+  onDelete: (id: string) => Promise<SetupActionResult>;
+}) {
   const [text, setText] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -92,23 +111,20 @@ function AgentRules({ rules }: { rules: SetupStatus["rules"] }) {
     });
   return (
     <>
-      <p className="text-[12px] text-stone-500 mb-3">
-        Правила діють у кожній відповіді агента та в чернетках нагадувань. Їх можна додати тут або прямо з адмін-групи:
-        відповісти на чернетку зауваженням — агент перепише її і збереже загальне зауваження як правило.
-      </p>
-      {rules.length === 0 ? (
-        <p className="text-sm text-stone-400 mb-3">Правил поки немає.</p>
+      <p className="text-[12px] text-stone-500 mb-3">{intro}</p>
+      {items.length === 0 ? (
+        <p className="text-sm text-stone-400 mb-3">{empty}</p>
       ) : (
         <ul className="space-y-1.5 mb-3">
-          {rules.map((r) => (
+          {items.map((r) => (
             <li key={r.id} className="flex items-start gap-2 text-sm">
               <span className="flex-1 text-stone-700">
                 {r.text}
-                {r.source === "admin_feedback" && <span className="text-stone-400 text-[11px]"> · з групи</span>}
+                {r.tag && <span className="text-stone-400 text-[11px]"> · {r.tag}</span>}
               </span>
               <button
                 disabled={pending}
-                onClick={() => run(() => deleteAgentRule(r.id))}
+                onClick={() => run(() => onDelete(r.id))}
                 className="text-[12px] text-stone-400 hover:text-rose-700 shrink-0"
               >
                 Видалити
@@ -121,19 +137,54 @@ function AgentRules({ rules }: { rules: SetupStatus["rules"] }) {
         <input
           value={text}
           onChange={(e) => setText(e.target.value)}
-          maxLength={400}
-          placeholder="Напр.: Не пропонуй знижок. Відповідай одним реченням, якщо питання просте."
+          maxLength={600}
+          placeholder={placeholder}
           className="flex-1 min-w-0 border border-stone-200 rounded px-3 py-1.5 text-sm"
         />
         <button
           disabled={pending || !text.trim()}
-          onClick={() => run(() => addAgentRule(text), () => setText(""))}
+          onClick={() => run(() => onAdd(text), () => setText(""))}
           className="text-[13px] bg-stone-900 text-white px-3 py-1.5 rounded hover:bg-stone-800 disabled:opacity-50"
         >
           Додати
         </button>
       </div>
       {msg && <p className="text-[12px] mt-1.5 text-stone-600">{msg}</p>}
+    </>
+  );
+}
+
+function ExampleList({ examples }: { examples: SetupStatus["examples"] }) {
+  const [pending, startTransition] = useTransition();
+  const label: Record<string, string> = { written: "написано командою", edited: "виправлено", approved: "схвалено" };
+  return (
+    <>
+      <p className="text-[12px] text-stone-500 mb-3">
+        Приклади збираються самі: кожна надіслана відповідь (схвалена, виправлена чи написана вами) і кожна «правильна
+        відповідь» з тренування. Агент бачить останні з них і переймає манеру. Тут можна видалити невдалі.
+      </p>
+      {examples.length === 0 ? (
+        <p className="text-sm text-stone-400">Прикладів поки немає.</p>
+      ) : (
+        <ul className="space-y-2.5">
+          {examples.map((e) => (
+            <li key={e.id} className="text-sm border-l-2 border-stone-200 pl-3">
+              <p className="text-stone-500">Клієнт: {e.client_message}</p>
+              <p className="text-stone-800">Ми: {e.reply}</p>
+              <p className="text-[11px] text-stone-400">
+                {label[e.quality] ?? e.quality} ·{" "}
+                <button
+                  disabled={pending}
+                  onClick={() => startTransition(async () => void (await deleteAgentExample(e.id)))}
+                  className="hover:text-rose-700"
+                >
+                  видалити
+                </button>
+              </p>
+            </li>
+          ))}
+        </ul>
+      )}
     </>
   );
 }
@@ -225,8 +276,32 @@ export default function SetupPanel({ status }: { status: SetupStatus }) {
         </section>
 
         <section className="bg-white rounded-md border border-stone-200 p-4 mb-5">
-          <h2 className="font-serif text-lg mb-2">5. Правила для агента</h2>
-          <AgentRules rules={status.rules} />
+          <h2 className="font-serif text-lg mb-2">5. Чого навчаємо агента</h2>
+          <p className="text-[12px] text-stone-500 mb-4">
+            Три види пам&apos;яті. <b>Правила</b> — як поводитись і звучати. <b>Факти</b> — що агент знає про пекарню.
+            <b> Приклади</b> — як ми реально відповідаємо. Все це можна додавати і з адмін-групи (
+            <code>/rule …</code>, <code>/fact …</code>, відповідь із зауваженням на чернетку) та в розділі «Тренування».
+          </p>
+          <h3 className="font-medium text-sm mb-1">Правила</h3>
+          <TeachList
+            intro="Діють у кожній відповіді агента та в чернетках нагадувань."
+            empty="Правил поки немає."
+            placeholder="Напр.: Звертайся на «ви». Не пропонуй знижок. Не став запитань у кінці, якщо не треба."
+            items={status.rules.map((r) => ({ id: r.id, text: r.text, tag: r.source === "admin_feedback" ? "з групи" : undefined }))}
+            onAdd={addAgentRule}
+            onDelete={deleteAgentRule}
+          />
+          <h3 className="font-medium text-sm mt-5 mb-1">Факти про пекарню</h3>
+          <TeachList
+            intro="Агент бере їх через інструмент і може цитувати (на відміну від цін, строків і доставки, які він бере з меню та правил потужності)."
+            empty="Фактів поки немає."
+            placeholder="Напр.: Ми не робимо торти за індивідуальним дизайном. Реквізити для оплати — …"
+            items={status.facts}
+            onAdd={addAgentFact}
+            onDelete={deleteAgentFact}
+          />
+          <h3 className="font-medium text-sm mt-5 mb-1">Приклади відповідей</h3>
+          <ExampleList examples={status.examples} />
         </section>
 
         <section className="bg-white rounded-md border border-stone-200 p-4 mb-5">

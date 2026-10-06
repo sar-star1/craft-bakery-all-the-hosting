@@ -21,6 +21,7 @@ export default function Sidebar({
   const isPendingReplies = pathname.startsWith("/pending-replies");
   const isMenu = pathname.startsWith("/menu");
   const isSetup = pathname.startsWith("/setup");
+  const isTraining = pathname.startsWith("/training");
 
   return (
     <aside className="w-56 shrink-0 border-r border-stone-200 bg-white/60 px-5 py-6 hidden md:flex md:flex-col">
@@ -65,6 +66,14 @@ export default function Sidebar({
         <span className="block px-3 py-1.5 rounded text-stone-300 cursor-default">
           {t.navCalendar}
         </span>
+        <Link
+          href="/training"
+          className={`block px-3 py-1.5 rounded ${
+            isTraining ? "bg-stone-900 text-white" : "text-stone-500 hover:bg-stone-100"
+          }`}
+        >
+          {lang === "uk" ? "Тренування" : "Training"}
+        </Link>
         <Link
           href="/setup"
           className={`block px-3 py-1.5 rounded ${

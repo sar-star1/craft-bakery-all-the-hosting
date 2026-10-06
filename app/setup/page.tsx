@@ -26,6 +26,8 @@ export default async function SetupPage() {
     supabase: null,
     telegram: null,
     rules: [],
+    facts: [],
+    examples: [],
   };
 
   if (isSupabaseConfigured()) {
@@ -51,6 +53,16 @@ export default async function SetupPage() {
         .eq("active", true)
         .order("created_at", { ascending: true });
       status.rules = (rules ?? []) as SetupStatus["rules"];
+      const [{ data: facts }, { data: examples }] = await Promise.all([
+        db.from("agent_knowledge").select("id, text").order("created_at", { ascending: true }),
+        db
+          .from("agent_examples")
+          .select("id, client_message, reply, quality")
+          .order("created_at", { ascending: false })
+          .limit(20),
+      ]);
+      status.facts = (facts ?? []) as SetupStatus["facts"];
+      status.examples = (examples ?? []) as SetupStatus["examples"];
     } catch (err) {
       status.supabase = { ok: false, error: err instanceof Error ? err.message : String(err) };
     }

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { AGENT_MODEL, getAnthropic, isAnthropicConfigured } from "@/lib/agent/anthropic";
 import { addGuideline } from "@/lib/agent/guidelines";
+import { addKnowledge } from "@/lib/agent/memory";
 import { requireAdmin } from "@/lib/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { notifyAdmin, telegramApi } from "@/lib/telegram";
@@ -69,4 +70,26 @@ export async function deleteAgentRule(id: string): Promise<SetupActionResult> {
   const { error } = await createSupabaseServerClient().from("agent_guidelines").delete().eq("id", id);
   revalidatePath("/setup");
   return error ? { ok: false, message: error.message } : { ok: true, message: "Правило видалено." };
+}
+
+// Business facts the agent may quote (served through its get_business_info tool).
+export async function addAgentFact(text: string): Promise<SetupActionResult> {
+  await requireAdmin();
+  const id = await addKnowledge(createSupabaseServerClient(), text, "manual");
+  revalidatePath("/setup");
+  return id ? { ok: true, message: "Факт додано." } : { ok: false, message: "Введіть текст." };
+}
+
+export async function deleteAgentFact(id: string): Promise<SetupActionResult> {
+  await requireAdmin();
+  const { error } = await createSupabaseServerClient().from("agent_knowledge").delete().eq("id", id);
+  revalidatePath("/setup");
+  return error ? { ok: false, message: error.message } : { ok: true, message: "Факт видалено." };
+}
+
+export async function deleteAgentExample(id: string): Promise<SetupActionResult> {
+  await requireAdmin();
+  const { error } = await createSupabaseServerClient().from("agent_examples").delete().eq("id", id);
+  revalidatePath("/setup");
+  return error ? { ok: false, message: error.message } : { ok: true, message: "Приклад видалено." };
 }

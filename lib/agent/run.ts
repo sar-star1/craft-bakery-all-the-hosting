@@ -7,6 +7,7 @@ import { notifyAdmin, sendTelegramMessage, sendTypingAction, startPayloadToClien
 import type { ClientSource, PipelineStage } from "@/lib/types";
 import { AGENT_MODEL, getAnthropic, isAnthropicConfigured } from "./anthropic";
 import { getActiveGuidelines } from "./guidelines";
+import { getExamples } from "./memory";
 import { decideOrderFlowReply, type TurnFlags } from "./policy";
 import { buildSystemPrompt } from "./prompt";
 import { AGENT_TOOLS, runTool, type ToolContext } from "./tools";
@@ -317,7 +318,18 @@ async function runAgent(
     .map((m) => ({ role: m.direction === "in" ? ("user" as const) : ("assistant" as const), content: m.text as string }));
   while (messages.length > 0 && messages[0].role !== "user") messages.shift();
 
-  const system = buildSystemPrompt({ client, capturedFields, guidelines: await getActiveGuidelines(db) });
+  const [guidelines, examples] = await Promise.all([getActiveGuidelines(db), getExamples(db)]);
+  const system = buildSystemPrompt({ client, capturedFields, guidelines, examples });
+  return runAgentLoop(system, messages, ctx);
+}
+
+// The tool-use loop, shared by real conversations and the dashboard's practice
+// chat (which passes a dry-run ToolContext).
+export async function runAgentLoop(
+  system: string,
+  messages: Anthropic.MessageParam[],
+  ctx: ToolContext
+): Promise<string | null> {
   const anthropic = getAnthropic();
 
   for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {

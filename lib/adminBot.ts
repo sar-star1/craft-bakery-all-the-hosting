@@ -2,6 +2,7 @@ import "server-only";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { buildDraftAlert } from "@/lib/adminAlerts";
 import { addGuideline, getActiveGuidelines } from "@/lib/agent/guidelines";
+import { addKnowledge } from "@/lib/agent/memory";
 import { isAnthropicConfigured } from "@/lib/agent/anthropic";
 import { reviseDraft } from "@/lib/agent/revise";
 import { answerCallbackQuery, editTelegramMessage, notifyAdmin } from "@/lib/telegram";
@@ -45,6 +46,7 @@ export async function handleAdminUpdate(update: TelegramUpdate): Promise<boolean
 
   const msg = update.message;
   if (msg && isAdminChat(msg.chat.id)) {
+    if (msg.text && !msg.from?.is_bot && (await handleTeachCommand(msg))) return true;
     if (msg.reply_to_message && msg.text && !msg.from?.is_bot) await handleReplyToDraft(msg);
     return true;
   }
@@ -76,6 +78,14 @@ async function handleButton(
       // already updated the message, so leave it alone.
       await answerCallbackQuery(queryId, result.alreadyHandled ? "Вже оброблено" : result.error);
     }
+    return;
+  }
+
+  const fact = data.match(/^kd:([0-9a-f-]{36})$/);
+  if (fact) {
+    await createSupabaseServerClient().from("agent_knowledge").delete().eq("id", fact[1]);
+    await answerCallbackQuery(queryId, "Факт видалено");
+    await editTelegramMessage(chat, messageId, `${original}\n\n🗑 Факт видалено · ${actor}`);
     return;
   }
 
@@ -177,7 +187,7 @@ async function handleReplyToDraft(msg: NonNullable<TelegramUpdate["message"]>) {
   }
 
   if (pending && revision.text) {
-    await db.from("pending_replies").update({ draft_text: revision.text }).eq("id", draft.id);
+    await db.from("pending_replies").update({ draft_text: revision.text, edited: true }).eq("id", draft.id);
     const alert = buildDraftAlert({
       id: draft.id as string,
       clientId: draft.client_id as string,
@@ -199,9 +209,44 @@ async function handleReplyToDraft(msg: NonNullable<TelegramUpdate["message"]>) {
   } else {
     await notifyAdmin(
       pending
-        ? "Переписав чернетку. Зауваження схоже на разове, тому як правило не зберіг."
+        ? revision.text
+          ? "Переписав чернетку. Зауваження схоже на разове, тому як правило не зберіг."
+          : "Не вдалося переписати чернетку за цим зауваженням — спробуйте сформулювати інакше або надішліть власний текст через «!»."
         : "Зауваження схоже на разове (стосується лише цього випадку), тому як правило не зберіг.",
       { replyTo: msg.message_id }
     );
   }
+}
+
+// /rule <text> teaches the agent how to behave or sound; /fact <text> teaches
+// it something about the business. Both are typed straight in the admin group.
+async function handleTeachCommand(msg: NonNullable<TelegramUpdate["message"]>): Promise<boolean> {
+  const match = (msg.text ?? "").match(/^\/(rule|fact)(?:@\w+)?(?:\s+([\s\S]*))?$/i);
+  if (!match) return false;
+  const kind = match[1].toLowerCase();
+  const body = (match[2] ?? "").trim();
+  if (!body) {
+    await notifyAdmin(
+      kind === "rule"
+        ? "Напишіть правило після команди, напр.: /rule Звертайся до клієнтів на «ви» і не використовуй емодзі."
+        : "Напишіть факт після команди, напр.: /fact Ми не приймаємо замовлення на торти за індивідуальним дизайном.",
+      { replyTo: msg.message_id }
+    );
+    return true;
+  }
+  const db = createSupabaseServerClient();
+  if (kind === "rule") {
+    const id = await addGuideline(db, body, "admin_feedback");
+    await notifyAdmin(`📌 Правило збережено: «${body.slice(0, 300)}»`, {
+      replyTo: msg.message_id,
+      buttons: id ? [[{ text: "🗑 Видалити правило", callback_data: `gd:${id}` }]] : undefined,
+    });
+  } else {
+    const id = await addKnowledge(db, body, "admin_group");
+    await notifyAdmin(`🧠 Факт збережено: «${body.slice(0, 300)}»`, {
+      replyTo: msg.message_id,
+      buttons: id ? [[{ text: "🗑 Видалити факт", callback_data: `kd:${id}` }]] : undefined,
+    });
+  }
+  return true;
 }

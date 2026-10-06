@@ -1,6 +1,7 @@
 import "server-only";
 import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { recordExample } from "@/lib/agent/memory";
 import { sendTelegramMessage } from "@/lib/telegram";
 
 export type ReplyResult =
@@ -26,7 +27,7 @@ export async function sendPendingReply(id: string, opts?: { text?: string }): Pr
 
   const { data: reply } = await db
     .from("pending_replies")
-    .select("id, draft_text, client_id, conversation_id, status")
+    .select("id, draft_text, client_id, conversation_id, status, edited, reply_type")
     .eq("id", id)
     .maybeSingle();
   if (!reply) return { ok: false, error: "Draft not found." };
@@ -65,6 +66,25 @@ export async function sendPendingReply(id: string, opts?: { text?: string }): Pr
     text,
     telegram_message_id: sent.messageId ?? null,
   });
+
+  // Learn from it: what the team sent (or fixed) becomes a worked example.
+  if (reply.reply_type === "order_flow") {
+    const { data: last } = await db
+      .from("messages")
+      .select("text")
+      .eq("client_id", reply.client_id)
+      .eq("direction", "in")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (last?.text) {
+      await recordExample(db, {
+        clientMessage: String(last.text),
+        reply: text,
+        quality: opts?.text ? "written" : reply.edited ? "edited" : "approved",
+      }).catch(() => {});
+    }
+  }
 
   refresh();
   return { ok: true, clientName: client.business_name as string };

@@ -3,6 +3,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { getStorefrontLink } from "@/lib/clientToken";
 import type { createSupabaseServerClient } from "@/lib/supabase/server";
 import { notifyAdmin } from "@/lib/telegram";
+import { getKnowledge } from "./memory";
 import type { PipelineStage } from "@/lib/types";
 import type { TurnFlags } from "./policy";
 
@@ -11,6 +12,8 @@ export interface ToolContext {
   client: { id: string; business_name: string; pipeline_stage: PipelineStage };
   conversationId: string;
   flags: TurnFlags;
+  // Practice chat in the dashboard: nothing may be written or announced.
+  dryRun?: boolean;
 }
 
 export const AGENT_TOOLS: Anthropic.Tool[] = [
@@ -42,6 +45,12 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
     name: "get_delivery_terms",
     description:
       "Get delivery zones, days, costs, minimum order amounts and payment terms. The ONLY valid source for any delivery or payment claim.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "get_business_info",
+    description:
+      "Facts the bakery's team has taught you about the business: policies, what we do and don't do, payment details, contacts, anything not covered by prices/capacity/delivery. The ONLY valid source for such claims. If it has no answer, call request_human_review.",
     input_schema: { type: "object", properties: {} },
   },
   {
@@ -176,6 +185,13 @@ export async function runTool(name: string, input: unknown, ctx: ToolContext): P
       return data?.content_json ? json(data.content_json) : "Delivery terms are not configured.";
     }
 
+    case "get_business_info": {
+      const facts = await getKnowledge(supabase);
+      return facts.length
+        ? json({ facts })
+        : "No business facts have been added yet. If the question needs one, call request_human_review.";
+    }
+
     case "get_client_history": {
       const [{ data: row }, { data: orders }] = await Promise.all([
         supabase
@@ -194,6 +210,7 @@ export async function runTool(name: string, input: unknown, ctx: ToolContext): P
     }
 
     case "update_captured_fields": {
+      if (ctx.dryRun) return "Saved (practice mode — not stored).";
       const fields = (args.fields ?? {}) as Record<string, unknown>;
       const { data: convo } = await supabase.from("conversations").select("captured_fields").eq("id", conversationId).single();
       const merged = { ...((convo?.captured_fields as Record<string, unknown>) ?? {}), ...fields };
@@ -241,6 +258,7 @@ export async function runTool(name: string, input: unknown, ctx: ToolContext): P
 
     case "flag_mass_order": {
       flags.massOrderFlagged = true;
+      if (ctx.dryRun) return "Flagged (practice mode — nobody was notified).";
       await supabase.from("mass_order_flags").insert({
         client_id: client.id,
         conversation_id: conversationId,
