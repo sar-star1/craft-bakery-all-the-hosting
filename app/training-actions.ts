@@ -21,7 +21,10 @@ const PRACTICE_CLIENT_ID = "00000000-0000-4000-8000-000000000000";
 
 // Talks to the real agent, with the real prompt, tools, rules and examples —
 // but as an invented client, with every write and every alert switched off.
-export async function practiceReply(history: PracticeTurn[]): Promise<{ ok: true; text: string; notes: string[] } | { ok: false; error: string }> {
+export async function practiceReply(
+  history: PracticeTurn[],
+  state: Record<string, unknown> = {}
+): Promise<{ ok: true; text: string; notes: string[]; state: Record<string, unknown> } | { ok: false; error: string }> {
   await requireAdmin();
   if (!isAnthropicConfigured()) return { ok: false, error: "ANTHROPIC_API_KEY не задано." };
   try {
@@ -31,7 +34,7 @@ export async function practiceReply(history: PracticeTurn[]): Promise<{ ok: true
     const [guidelines, examples] = await Promise.all([getActiveGuidelines(db), getExamples(db)]);
     const system = buildSystemPrompt({
       client: { ...client, contact_name: null, standing_order_notes: null, blocker_note: null },
-      capturedFields: {},
+      capturedFields: state,
       guidelines,
       examples,
     });
@@ -40,14 +43,23 @@ export async function practiceReply(history: PracticeTurn[]): Promise<{ ok: true
       content: t.text,
     }));
     while (messages.length > 0 && messages[0].role !== "user") messages.shift();
-    const text = await runAgentLoop(system, messages, { supabase: db, client, conversationId: PRACTICE_CLIENT_ID, flags, dryRun: true });
+    const practiceState = { ...state };
+    const text = await runAgentLoop(system, messages, {
+      supabase: db,
+      client,
+      conversationId: PRACTICE_CLIENT_ID,
+      flags,
+      dryRun: true,
+      inboundCount: history.filter((t) => t.role === "client").length,
+      practiceState,
+    });
     if (!text) return { ok: false, error: flags.humanReviewReasons.join("; ") || "Агент не дав відповіді." };
     const notes = [
       ...flags.humanReviewReasons.map((r) => `Передав би людині: ${r}`),
       ...(flags.massOrderFlagged ? ["Позначив би як масове замовлення"] : []),
       ...(flags.confirmationProposed ? ["Запропонував домовленість — чекала б на підтвердження"] : []),
     ];
-    return { ok: true, text, notes };
+    return { ok: true, text, notes, state: practiceState };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }

@@ -239,11 +239,17 @@ async function handleMessage(msg: TelegramMessage, text: string) {
     confirmationProposed: false,
     menuLinkSent: false,
   };
+  const { count: inboundCount } = await db
+    .from("messages")
+    .select("id", { count: "exact", head: true })
+    .eq("client_id", clientRow.id)
+    .eq("direction", "in");
   const ctx: ToolContext = {
     supabase: db,
     client: { id: clientRow.id, business_name: clientRow.business_name, pipeline_stage: clientRow.pipeline_stage },
     conversationId: conversation.id,
     flags,
+    inboundCount: inboundCount ?? 1,
   };
 
   const reply = await runAgent(db, ctx, clientRow, conversation.captured_fields);

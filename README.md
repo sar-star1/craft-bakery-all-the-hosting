@@ -154,8 +154,12 @@ waits in Pending Replies.
 - **No Telegram Business Connection.** Its `can_reply` only works within 24
   hours of the client's last message, which would block proactive reminders
   and re-engagement. A standard bot has no such window.
-- **Orders happen on the site, not in chat.** The agent qualifies, answers
-  questions from live data, and sends the personal link; the link's token
-  links the finished order to the right client deterministically.
+- **Orders can be taken in chat or on the site.** In chat the agent builds a
+  cart with `get_menu` / `update_order_draft`, shows a summary priced by
+  `review_order` (same rules as the site, `priceOrderLines`), and calls
+  `place_order` only after the client confirms in a *later* message — enforced
+  in code, not just by the prompt. Orders land in the board as source
+  "Telegram" with an alert in the admin group. The site stays an option via the
+  personal link, whose token links the order to the client deterministically.
 - **The agent never states a price, capacity, or delivery figure it didn't
   get from a tool in that conversation turn** (see `lib/agent/prompt.ts`).

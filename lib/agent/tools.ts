@@ -4,6 +4,7 @@ import { getStorefrontLink } from "@/lib/clientToken";
 import type { createSupabaseServerClient } from "@/lib/supabase/server";
 import { notifyAdmin } from "@/lib/telegram";
 import { getKnowledge } from "./memory";
+import { ORDER_TOOLS, isOrderTool, runOrderTool } from "./orderTools";
 import type { PipelineStage } from "@/lib/types";
 import type { TurnFlags } from "./policy";
 
@@ -14,9 +15,14 @@ export interface ToolContext {
   flags: TurnFlags;
   // Practice chat in the dashboard: nothing may be written or announced.
   dryRun?: boolean;
+  // Client messages in this conversation so far (incl. the one being answered).
+  inboundCount: number;
+  // Practice chat only: the "conversation memory", sent back and forth with the browser.
+  practiceState?: Record<string, unknown>;
 }
 
 export const AGENT_TOOLS: Anthropic.Tool[] = [
+  ...ORDER_TOOLS,
   {
     name: "get_price",
     description:
@@ -153,6 +159,7 @@ export async function runTool(name: string, input: unknown, ctx: ToolContext): P
       if (scored.length === 0) return "No matching menu items found.";
       return json(
         scored.map(({ i }) => ({
+          id: i.id,
           name: i.name_uk,
           category: categoryById.get(i.category_id)?.name_uk,
           price_uah: i.price,
@@ -211,7 +218,8 @@ export async function runTool(name: string, input: unknown, ctx: ToolContext): P
 
     case "update_captured_fields": {
       if (ctx.dryRun) return "Saved (practice mode — not stored).";
-      const fields = (args.fields ?? {}) as Record<string, unknown>;
+      const fields = { ...((args.fields ?? {}) as Record<string, unknown>) };
+      delete fields.draft_order; // the cart is only changed through the order tools
       const { data: convo } = await supabase.from("conversations").select("captured_fields").eq("id", conversationId).single();
       const merged = { ...((convo?.captured_fields as Record<string, unknown>) ?? {}), ...fields };
       await supabase.from("conversations").update({ captured_fields: merged }).eq("id", conversationId);
@@ -277,6 +285,7 @@ export async function runTool(name: string, input: unknown, ctx: ToolContext): P
     }
 
     default:
+      if (isOrderTool(name)) return runOrderTool(name, args, ctx);
       return `Unknown tool: ${name}`;
   }
 }

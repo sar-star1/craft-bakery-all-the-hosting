@@ -3,11 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { refTokenToClientId } from "@/lib/clientToken";
-import { MIN_ORDER_TOTAL_UAH } from "@/lib/orderRules";
 import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase/server";
-import { isTelegramConfigured, notifyAdmin } from "@/lib/telegram";
-import { markClientOrdered } from "@/lib/orders";
-import type { OrderLine } from "@/lib/types";
+import { announceNewOrder, markClientOrdered, priceOrderLines } from "@/lib/orders";
 
 
 const orderSchema = z.object({
@@ -36,57 +33,9 @@ export async function submitWebsiteOrder(input: SubmitOrderInput): Promise<Submi
   if (!isSupabaseConfigured()) return { ok: false, error: "not_configured" };
   const supabase = createSupabaseServerClient();
 
-  const itemIds = data.lines.map((l) => l.item_id);
-  const [{ data: items }, { data: categories }] = await Promise.all([
-    supabase.from("menu_items").select("id, name_uk, price, category_id, min_order_override, is_active").in("id", itemIds),
-    supabase.from("menu_categories").select("id, name_uk, min_order"),
-  ]);
-
-  const itemById = new Map((items ?? []).map((i) => [i.id as string, i]));
-  const categoryById = new Map((categories ?? []).map((c) => [c.id as string, c]));
-
-  const lines: OrderLine[] = [];
-  const groupQty = new Map<string, number>();
-  const issues: string[] = [];
-
-  for (const l of data.lines) {
-    const item = itemById.get(l.item_id);
-    const category = item ? categoryById.get(item.category_id as string) : undefined;
-    if (!item || !category || !item.is_active) return { ok: false, error: "unavailable" };
-
-    const unit = Number(item.price);
-    lines.push({
-      name: item.name_uk as string,
-      category: category.name_uk as string,
-      qty: l.qty,
-      unit_price: unit,
-      subtotal: unit * l.qty,
-    });
-
-    if (item.min_order_override) {
-      if (l.qty < item.min_order_override) {
-        issues.push(`${item.name_uk} — мінімум ${item.min_order_override} шт.`);
-      }
-    } else {
-      groupQty.set(category.id as string, (groupQty.get(category.id as string) ?? 0) + l.qty);
-    }
-  }
-  for (const [categoryId, qty] of groupQty) {
-    const category = categoryById.get(categoryId)!;
-    if (qty < (category.min_order as number)) {
-      issues.push(`${category.name_uk} — мінімум ${category.min_order} шт. у групі (зараз ${qty})`);
-    }
-  }
-  if (issues.length > 0) return { ok: false, error: "minimums", issues };
-
-  const total = lines.reduce((s, l) => s + l.subtotal, 0);
-  if (total < MIN_ORDER_TOTAL_UAH) {
-    return {
-      ok: false,
-      error: "min_total",
-      issues: [`Мінімальна сума замовлення — ${MIN_ORDER_TOTAL_UAH.toLocaleString("uk-UA")} грн (зараз ${total} грн)`],
-    };
-  }
+  const priced = await priceOrderLines(supabase, data.lines.map((l) => ({ item_id: l.item_id, qty: l.qty })));
+  if (!priced.ok) return { ok: false, error: priced.error, issues: priced.issues };
+  const { lines, total } = priced;
 
   let clientId: string | null = null;
   const refClientId = refTokenToClientId(data.ref);
@@ -135,27 +84,16 @@ export async function submitWebsiteOrder(input: SubmitOrderInput): Promise<Submi
   try {
     if (clientId) await markClientOrdered(supabase, clientId);
 
-    if (isTelegramConfigured()) {
-      const base = process.env.SITE_URL?.replace(/\/$/, "");
-      const status = needsReview ? "pending_review" : "new";
-      await notifyAdmin(
-        [
-          `Нове замовлення з сайту: ${data.customer_name} · ${total} ₴`,
-          summary.length > 300 ? `${summary.slice(0, 297)}...` : summary,
-          data.address,
-          data.phone,
-          needsReview ? "Потребує перевірки: замовлення не прив'язане до жодного клієнта." : "",
-        ]
-          .filter(Boolean)
-          .join("\n"),
-        {
-          buttons: [
-            [{ text: needsReview ? "👍 Перевірено" : "✅ Підтвердити", callback_data: `os:${inserted.id}:${status}` }],
-            ...(base ? [[{ text: "Відкрити в дашборді", url: `${base}/` }]] : []),
-          ],
-        }
-      );
-    }
+    await announceNewOrder({
+      orderId: inserted.id as string,
+      origin: "сайту",
+      customerName: data.customer_name,
+      total,
+      summary,
+      address: data.address,
+      phone: data.phone,
+      needsReview,
+    });
 
     revalidatePath("/");
     revalidatePath("/clients");
