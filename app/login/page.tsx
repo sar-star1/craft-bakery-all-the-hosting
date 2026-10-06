@@ -1,7 +1,7 @@
 import { login } from "@/app/auth-actions";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Вхід — Craft Bakery by Dubova" };
+export const metadata = { title: "Вхід — Peremoga Bakery" };
 
 export default async function LoginPage({
   searchParams,
@@ -13,8 +13,8 @@ export default async function LoginPage({
   return (
     <div className="min-h-screen flex items-center justify-center px-6">
       <form action={login} className="w-full max-w-sm bg-white rounded-lg border border-stone-200 p-6 shadow-sm">
-        <p className="font-serif text-lg leading-tight">Craft Bakery</p>
-        <p className="font-serif text-lg leading-tight text-stone-400 italic mb-5">by Dubova</p>
+        <p className="font-serif text-lg leading-tight">Peremoga</p>
+        <p className="font-serif text-lg leading-tight text-stone-400 italic mb-5">Bakery</p>
 
         {error === "config" ? (
           <p className="text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded px-3 py-2">

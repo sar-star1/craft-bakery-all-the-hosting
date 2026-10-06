@@ -1,7 +1,7 @@
-# Craft Bakery by Dubova — Admin CRM
+# Peremoga Bakery — Admin CRM
 
 Next.js admin dashboard, public ordering storefront, and Telegram AI agent
-for Craft Bakery's B2B client relationships, built against the schema in
+for Peremoga Bakery's B2B client relationships, built against the schema in
 [`supabase/schema.sql`](supabase/schema.sql). Runs entirely on sample data
 until real credentials are configured — see Setup below.
 
@@ -73,6 +73,7 @@ until real credentials are configured — see Setup below.
   client's personal link) attributes the order to that client and prefills
   their name. Orders are validated and priced server-side
   (`app/order-actions.ts`) — the browser only sends item ids and quantities.
+  Orders under 1 000 ₴ are refused (storefront and server, `lib/orderRules.ts`).
 - **Telegram agent** (`/api/telegram/webhook` → `lib/agent`): a standard bot
   that remembers each client, answers from tools only (`get_price`,
   `check_capacity`, `get_delivery_terms`, `get_client_history`,

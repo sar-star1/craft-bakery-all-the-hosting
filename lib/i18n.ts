@@ -12,8 +12,8 @@ export type Lang = "uk" | "en";
 
 export const STR = {
   uk: {
-    brand1: "Craft Bakery",
-    brand2: "by Dubova",
+    brand1: "Peremoga",
+    brand2: "Bakery",
     navOrders: "Замовлення",
     navCustomers: "Клієнти",
     navPendingReplies: "Чернетки",
@@ -194,8 +194,8 @@ export const STR = {
     saveContent: "Зберегти",
   },
   en: {
-    brand1: "Craft Bakery",
-    brand2: "by Dubova",
+    brand1: "Peremoga",
+    brand2: "Bakery",
     navOrders: "Orders",
     navCustomers: "Customers",
     navPendingReplies: "Drafts",

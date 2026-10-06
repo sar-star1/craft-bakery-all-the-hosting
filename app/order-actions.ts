@@ -3,13 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { refTokenToClientId } from "@/lib/clientToken";
+import { MIN_ORDER_TOTAL_UAH } from "@/lib/orderRules";
 import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { isTelegramConfigured, notifyAdmin } from "@/lib/telegram";
 import type { OrderLine, PipelineStage } from "@/lib/types";
 
-// Orders below this total are flagged for a human look rather than rejected
-// (matches the "Мінімальна сума замовлення — 1 000 грн" delivery term).
-const MIN_ORDER_TOTAL_UAH = 1000;
 
 const orderSchema = z.object({
   ref: z.string().max(64).optional(),
@@ -90,6 +88,13 @@ export async function submitWebsiteOrder(input: SubmitOrderInput): Promise<Submi
   if (issues.length > 0) return { ok: false, error: "minimums", issues };
 
   const total = lines.reduce((s, l) => s + l.subtotal, 0);
+  if (total < MIN_ORDER_TOTAL_UAH) {
+    return {
+      ok: false,
+      error: "min_total",
+      issues: [`Мінімальна сума замовлення — ${MIN_ORDER_TOTAL_UAH.toLocaleString("uk-UA")} грн (зараз ${total} грн)`],
+    };
+  }
 
   let clientId: string | null = null;
   let client: { pipeline_stage: PipelineStage } | null = null;
@@ -106,9 +111,9 @@ export async function submitWebsiteOrder(input: SubmitOrderInput): Promise<Submi
     }
   }
 
-  // An order from a known client's personal link that meets the minimum
-  // goes straight to "new"; anything unlinked or borderline waits for review.
-  const needsReview = !clientId || total < MIN_ORDER_TOTAL_UAH;
+  // An order from a known client's personal link goes straight to "new";
+  // one that can't be tied to a client waits for a human look.
+  const needsReview = !clientId;
 
   const summary = lines.map((l) => `${l.name} ×${l.qty}`).join(", ");
   const { data: inserted, error } = await supabase
@@ -154,7 +159,7 @@ export async function submitWebsiteOrder(input: SubmitOrderInput): Promise<Submi
         summary.length > 300 ? `${summary.slice(0, 297)}...` : summary,
         data.address,
         data.phone,
-        needsReview ? "Потребує перевірки (немає прив'язки до клієнта або сума менша за мінімум)." : "",
+        needsReview ? "Потребує перевірки: замовлення не прив'язане до жодного клієнта." : "",
       ]
         .filter(Boolean)
         .join("\n"),
