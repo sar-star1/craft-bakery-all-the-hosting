@@ -15,7 +15,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "./ui/sheet";
 
 const LOGO_URL =
-  "https://menuorderperemoga.lovable.app/__l5e/assets-v1/b9359812-d0d8-47b6-8059-dc9280a0ecab/peremoga-logo.jpg";
+  "/menu/logo.jpg";
 
 const slugify = (name: string) =>
   "cat-" +
