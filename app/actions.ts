@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createSeasonalOfferDrafts, type OfferSegment } from "@/lib/jobs";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/auth";
+import { markClientOrdered } from "@/lib/orders";
 import { rejectPendingReply as rejectReply, sendPendingReply } from "@/lib/replies";
 import { getBotDeepLink } from "@/lib/telegram";
 import {
@@ -81,6 +82,25 @@ export async function revertOrderStatus(id: string, currentStatus: OrderStatus) 
 
   if (error) throw new Error(error.message);
   revalidatePath("/");
+}
+
+// Attaches an order that arrived without a personal link to a client, and
+// moves that client up the funnel as if they had ordered through their link.
+export async function linkOrderToClient(orderId: string, clientId: string) {
+  await requireAdmin();
+  const supabase = createSupabaseServerClient();
+  const { data: order } = await supabase
+    .from("orders")
+    .update({ client_id: clientId })
+    .eq("id", orderId)
+    .is("client_id", null)
+    .select("created_at")
+    .maybeSingle();
+  if (!order) throw new Error("Order not found or already linked.");
+  await markClientOrdered(supabase, clientId, order.created_at as string);
+  revalidatePath("/");
+  revalidatePath("/clients");
+  revalidatePath(`/clients/${clientId}`);
 }
 
 export interface PendingReplyActionState {

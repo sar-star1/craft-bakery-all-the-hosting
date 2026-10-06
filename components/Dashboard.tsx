@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { advanceOrderStatus, revertOrderStatus } from "@/app/actions";
+import { advanceOrderStatus, linkOrderToClient, revertOrderStatus } from "@/app/actions";
 import type { Lang } from "@/lib/i18n";
 import { STR } from "@/lib/i18n";
 import { nextStatus, prevStatus, type Order } from "@/lib/types";
@@ -14,9 +14,11 @@ import NewOrderForm from "./NewOrderForm";
 
 export default function Dashboard({
   initialOrders,
+  clients,
   sampleMode = false,
 }: {
   initialOrders: Order[];
+  clients: { id: string; business_name: string }[];
   // Skips the real Supabase-backed server actions so the UI stays fully
   // interactive when previewing with lib/mockOrders.ts (no DB to write to).
   sampleMode?: boolean;
@@ -53,6 +55,14 @@ export default function Dashboard({
     startTransition(async () => {
       const order = orders.find((o) => o.id === id);
       if (order) await revertOrderStatus(id, order.status);
+    });
+  };
+
+  const link = (orderId: string, clientId: string) => {
+    setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, client_id: clientId } : o)));
+    if (sampleMode) return;
+    startTransition(async () => {
+      await linkOrderToClient(orderId, clientId);
     });
   };
 
@@ -129,6 +139,8 @@ export default function Dashboard({
         onClose={() => setOpenOrderId(null)}
         onAdvance={advance}
         onBack={back}
+        clients={clients}
+        onLink={link}
       />
 
       {showForm && (

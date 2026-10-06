@@ -144,7 +144,36 @@ create table pending_replies (
     check (reply_type in ('order_flow', 'weekly_reminder', 'remarketing', 'seasonal_offer')),
   status text not null default 'awaiting_approval'
     check (status in ('awaiting_approval', 'approved_sent', 'rejected')),
+  edited boolean not null default false,   -- rewritten from admin feedback before approval
   admin_message_id bigint,   -- the alert in the admin Telegram group (buttons + reply-to-edit)
+  created_at timestamptz default now()
+);
+
+-- Standing instructions for the agent, appended to every prompt it runs on.
+-- Added from the dashboard (Settings) or learned from admin feedback in the group.
+create table agent_guidelines (
+  id uuid primary key default gen_random_uuid(),
+  text text not null,
+  active boolean not null default true,
+  source text not null default 'manual' check (source in ('manual', 'admin_feedback')),
+  created_at timestamptz default now()
+);
+
+-- Business facts the team has taught the agent (served via its get_business_info tool).
+create table agent_knowledge (
+  id uuid primary key default gen_random_uuid(),
+  text text not null,
+  source text not null default 'manual' check (source in ('manual', 'admin_group')),
+  created_at timestamptz default now()
+);
+
+-- Worked examples of how the bakery answers: every sent/edited/written reply
+-- and every training-chat "good answer". The latest are shown to the agent.
+create table agent_examples (
+  id uuid primary key default gen_random_uuid(),
+  client_message text not null,
+  reply text not null,
+  quality text not null check (quality in ('approved', 'edited', 'written')),
   created_at timestamptz default now()
 );
 
@@ -193,6 +222,9 @@ alter table capacity_rules enable row level security;
 alter table mass_order_flags enable row level security;
 alter table pending_replies enable row level security;
 alter table messages enable row level security;
+alter table agent_guidelines enable row level security;
+alter table agent_knowledge enable row level security;
+alter table agent_examples enable row level security;
 
 -- Public bucket for menu photos — served directly by Supabase's CDN, no
 -- signed URLs needed since these are just product photos, not sensitive.

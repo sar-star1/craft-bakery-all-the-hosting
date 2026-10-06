@@ -1,5 +1,10 @@
 import "server-only";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { buildDraftAlert } from "@/lib/adminAlerts";
+import { addGuideline, getActiveGuidelines } from "@/lib/agent/guidelines";
+import { addKnowledge } from "@/lib/agent/memory";
+import { isAnthropicConfigured } from "@/lib/agent/anthropic";
+import { reviseDraft } from "@/lib/agent/revise";
 import { answerCallbackQuery, editTelegramMessage, notifyAdmin } from "@/lib/telegram";
 import { nextStatus, type OrderStatus } from "@/lib/types";
 import { rejectPendingReply, sendPendingReply } from "@/lib/replies";
@@ -41,6 +46,7 @@ export async function handleAdminUpdate(update: TelegramUpdate): Promise<boolean
 
   const msg = update.message;
   if (msg && isAdminChat(msg.chat.id)) {
+    if (msg.text && !msg.from?.is_bot && (await handleTeachCommand(msg))) return true;
     if (msg.reply_to_message && msg.text && !msg.from?.is_bot) await handleReplyToDraft(msg);
     return true;
   }
@@ -75,6 +81,23 @@ async function handleButton(
     return;
   }
 
+  const fact = data.match(/^kd:([0-9a-f-]{36})$/);
+  if (fact) {
+    await createSupabaseServerClient().from("agent_knowledge").delete().eq("id", fact[1]);
+    await answerCallbackQuery(queryId, "Факт видалено");
+    await editTelegramMessage(chat, messageId, `${original}\n\n🗑 Факт видалено · ${actor}`);
+    return;
+  }
+
+  const rule = data.match(/^gd:([0-9a-f-]{36})$/);
+  if (rule) {
+    const db = createSupabaseServerClient();
+    await db.from("agent_guidelines").delete().eq("id", rule[1]);
+    await answerCallbackQuery(queryId, "Правило видалено");
+    await editTelegramMessage(chat, messageId, `${original}\n\n🗑 Правило видалено · ${actor}`);
+    return;
+  }
+
   const order = data.match(/^os:([0-9a-f-]{36}):(pending_review|new)$/);
   if (order) {
     const from = order[2] as OrderStatus;
@@ -93,26 +116,137 @@ async function handleButton(
   await answerCallbackQuery(queryId);
 }
 
-// An admin replying to a draft alert with their own text sends that text to
-// the client instead of the draft.
+// An admin replying to a draft alert. Two meanings, kept explicit so a remark
+// is never sent to a client by accident:
+//   "! text"  → send exactly that text to the client instead of the draft;
+//   anything else → feedback for the agent: it rewrites the draft (if still
+//                   pending) and, when the remark is a general one, saves it as
+//                   a standing rule that applies to all future replies.
 async function handleReplyToDraft(msg: NonNullable<TelegramUpdate["message"]>) {
   const db = createSupabaseServerClient();
   const target = msg.reply_to_message!;
+  const chat = String(msg.chat.id);
+  const actor = actorName(msg.from);
+  const text = (msg.text ?? "").trim();
+  if (!text) return;
+
   const { data: draft } = await db
     .from("pending_replies")
-    .select("id")
+    .select("id, client_id, draft_text, status, reply_type")
     .eq("admin_message_id", target.message_id)
-    .eq("status", "awaiting_approval")
     .maybeSingle();
   if (!draft) return;
+  const pending = draft.status === "awaiting_approval";
 
-  const result = await sendPendingReply(draft.id as string, { text: msg.text });
-  const chat = String(msg.chat.id);
-  if (result.ok) {
-    if (target.text) {
-      await editTelegramMessage(chat, target.message_id, `${stripHint(target.text)}\n\n✏️ Надіслано власний текст · ${actorName(msg.from)}`);
+  if (text.startsWith("!")) {
+    const own = text.replace(/^!+\s*/, "");
+    if (!own) return;
+    if (!pending) {
+      await notifyAdmin("Ця чернетка вже оброблена — власний текст не надіслано.", { replyTo: msg.message_id });
+      return;
     }
-  } else if (!result.alreadyHandled) {
-    await notifyAdmin(`Не вдалося надіслати: ${result.error}`);
+    const result = await sendPendingReply(draft.id as string, { text: own });
+    if (result.ok) {
+      if (target.text) {
+        await editTelegramMessage(chat, target.message_id, `${stripHint(target.text)}\n\n✏️ Надіслано власний текст · ${actor}`);
+      }
+    } else if (!result.alreadyHandled) {
+      await notifyAdmin(`Не вдалося надіслати: ${result.error}`, { replyTo: msg.message_id });
+    }
+    return;
   }
+
+  if (!isAnthropicConfigured()) {
+    await notifyAdmin("AI не налаштовано (ANTHROPIC_API_KEY) — не можу опрацювати зауваження.", { replyTo: msg.message_id });
+    return;
+  }
+
+  const [{ data: client }, { data: rows }, guidelines] = await Promise.all([
+    db.from("clients").select("business_name").eq("id", draft.client_id).maybeSingle(),
+    db.from("messages").select("direction, text").eq("client_id", draft.client_id).order("created_at", { ascending: false }).limit(10),
+    getActiveGuidelines(db),
+  ]);
+  const history = (rows ?? []).reverse().map((m) => ({ direction: String(m.direction), text: String(m.text) }));
+  const clientMessage = [...history].reverse().find((m) => m.direction === "in")?.text;
+
+  let revision;
+  try {
+    revision = await reviseDraft({
+      draft: draft.draft_text as string,
+      feedback: text,
+      clientMessage,
+      history,
+      guidelines,
+      rewrite: pending,
+    });
+  } catch (err) {
+    await notifyAdmin(`Не вдалося опрацювати зауваження: ${err instanceof Error ? err.message : String(err)}`, {
+      replyTo: msg.message_id,
+    });
+    return;
+  }
+
+  if (pending && revision.text) {
+    await db.from("pending_replies").update({ draft_text: revision.text, edited: true }).eq("id", draft.id);
+    const alert = buildDraftAlert({
+      id: draft.id as string,
+      clientId: draft.client_id as string,
+      clientName: (client?.business_name as string) ?? "—",
+      replyType: draft.reply_type as string,
+      text: revision.text,
+      clientMessage,
+      note: `✏️ Переписано за зауваженням · ${actor}`,
+    });
+    await editTelegramMessage(chat, target.message_id, alert.text, alert.buttons);
+  }
+
+  if (revision.rule) {
+    const ruleId = await addGuideline(db, revision.rule, "admin_feedback");
+    await notifyAdmin(`📌 Запам'ятав правило для всіх наступних відповідей:\n«${revision.rule}»`, {
+      replyTo: msg.message_id,
+      buttons: ruleId ? [[{ text: "🗑 Видалити правило", callback_data: `gd:${ruleId}` }]] : undefined,
+    });
+  } else {
+    await notifyAdmin(
+      pending
+        ? revision.text
+          ? "Переписав чернетку. Зауваження схоже на разове, тому як правило не зберіг."
+          : "Не вдалося переписати чернетку за цим зауваженням — спробуйте сформулювати інакше або надішліть власний текст через «!»."
+        : "Зауваження схоже на разове (стосується лише цього випадку), тому як правило не зберіг.",
+      { replyTo: msg.message_id }
+    );
+  }
+}
+
+// /rule <text> teaches the agent how to behave or sound; /fact <text> teaches
+// it something about the business. Both are typed straight in the admin group.
+async function handleTeachCommand(msg: NonNullable<TelegramUpdate["message"]>): Promise<boolean> {
+  const match = (msg.text ?? "").match(/^\/(rule|fact)(?:@\w+)?(?:\s+([\s\S]*))?$/i);
+  if (!match) return false;
+  const kind = match[1].toLowerCase();
+  const body = (match[2] ?? "").trim();
+  if (!body) {
+    await notifyAdmin(
+      kind === "rule"
+        ? "Напишіть правило після команди, напр.: /rule Звертайся до клієнтів на «ви» і не використовуй емодзі."
+        : "Напишіть факт після команди, напр.: /fact Ми не приймаємо замовлення на торти за індивідуальним дизайном.",
+      { replyTo: msg.message_id }
+    );
+    return true;
+  }
+  const db = createSupabaseServerClient();
+  if (kind === "rule") {
+    const id = await addGuideline(db, body, "admin_feedback");
+    await notifyAdmin(`📌 Правило збережено: «${body.slice(0, 300)}»`, {
+      replyTo: msg.message_id,
+      buttons: id ? [[{ text: "🗑 Видалити правило", callback_data: `gd:${id}` }]] : undefined,
+    });
+  } else {
+    const id = await addKnowledge(db, body, "admin_group");
+    await notifyAdmin(`🧠 Факт збережено: «${body.slice(0, 300)}»`, {
+      replyTo: msg.message_id,
+      buttons: id ? [[{ text: "🗑 Видалити факт", callback_data: `kd:${id}` }]] : undefined,
+    });
+  }
+  return true;
 }

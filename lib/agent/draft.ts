@@ -1,6 +1,7 @@
 import "server-only";
 import { getStorefrontLink } from "@/lib/clientToken";
 import { AGENT_MODEL, getAnthropic } from "./anthropic";
+import { guidelinesBlock } from "./guidelines";
 
 export type OutboundKind = "weekly_reminder" | "remarketing" | "seasonal_offer";
 
@@ -38,6 +39,7 @@ export async function draftOutbound(input: {
   recentOrders: string[];
   leadStage?: string;
   blockerNote?: string | null;
+  guidelines?: string[];
   offerText?: string;
 }): Promise<string | null> {
   const link = getStorefrontLink(input.clientId);
@@ -51,7 +53,8 @@ export async function draftOutbound(input: {
 ПРАВИЛА
 - Не називай жодних цін, знижок, сум чи строків, окрім тих, що прямо наведені в тексті пропозиції нижче (якщо він є).
 - Посилання на меню вставляй ТОЧНО як токен {{MENU_LINK}} — один раз, там де воно доречне. Не вигадуй інших посилань.
-- Не вигадуй фактів про клієнта. Поверни лише текст повідомлення, без пояснень.`,
+- Не вигадуй фактів про клієнта. Поверни лише текст повідомлення, без пояснень.
+${guidelinesBlock(input.guidelines ?? [])}`,
     messages: [
       {
         role: "user",

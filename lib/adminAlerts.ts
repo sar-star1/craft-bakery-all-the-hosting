@@ -13,12 +13,18 @@ export const REPLY_TYPE_LABEL: Record<string, string> = {
 
 const siteBase = () => process.env.SITE_URL?.replace(/\/$/, "");
 
-// Posts a drafted reply to the admin group with one-tap buttons, and remembers
-// the group message so a reply to it can be sent in place of the draft.
-export async function announceDraft(
-  db: Db,
-  draft: { id: string; clientId: string; clientName: string; replyType: string; text: string; clientMessage?: string; reason?: string }
-): Promise<void> {
+export interface DraftAlert {
+  id: string;
+  clientId: string;
+  clientName: string;
+  replyType: string;
+  text: string;
+  clientMessage?: string;
+  reason?: string;
+  note?: string; // appended line, e.g. who revised it
+}
+
+export function buildDraftAlert(draft: DraftAlert): { text: string; buttons: InlineButton[][] } {
   const base = siteBase();
   const buttons: InlineButton[][] = [
     [
@@ -32,9 +38,17 @@ export async function announceDraft(
     `${REPLY_TYPE_LABEL[draft.replyType] ?? "Чернетка"} · ${draft.clientName}${draft.reason ? ` (${draft.reason})` : ""}`,
     draft.clientMessage ? `\nКлієнт: «${draft.clientMessage.slice(0, 600)}»` : "",
     `\nЧернетка:\n«${draft.text.slice(0, 1500)}»`,
-    "\n✏️ Щоб надіслати власний текст — відповідайте на це повідомлення.",
+    draft.note ? `\n${draft.note}` : "",
+    "\n✏️ Відповідь на це повідомлення: звичайний текст — зауваження агенту (перепише чернетку й, якщо зауваження загальне, запам'ятає правило); текст, що починається з «!», піде клієнту як є.",
   ];
-  const res = await notifyAdmin(lines.filter(Boolean).join("\n"), { buttons });
+  return { text: lines.filter(Boolean).join("\n"), buttons };
+}
+
+// Posts a drafted reply to the admin group with one-tap buttons, and remembers
+// the group message so replies to it (feedback, or "!" text) can be matched.
+export async function announceDraft(db: Db, draft: DraftAlert): Promise<void> {
+  const { text, buttons } = buildDraftAlert(draft);
+  const res = await notifyAdmin(text, { buttons });
   if (res.ok && res.messageId) {
     await db.from("pending_replies").update({ admin_message_id: res.messageId }).eq("id", draft.id);
   }

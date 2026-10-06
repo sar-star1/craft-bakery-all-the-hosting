@@ -3,6 +3,7 @@ import { draftOutbound, type OutboundKind } from "@/lib/agent/draft";
 import { isAnthropicConfigured } from "@/lib/agent/anthropic";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { announceDrafts } from "@/lib/adminAlerts";
+import { getActiveGuidelines } from "@/lib/agent/guidelines";
 
 type Db = ReturnType<typeof createSupabaseServerClient>;
 
@@ -47,6 +48,7 @@ async function queueDraft(db: Db, client: JobClient, kind: OutboundKind, offerTe
     standingOrderNotes: client.standing_order_notes,
     leadStage: client.pipeline_stage,
     blockerNote: client.blocker_note,
+    guidelines: await getActiveGuidelines(db),
     recentOrders: await recentOrderSummaries(db, client.id),
     offerText,
   });
