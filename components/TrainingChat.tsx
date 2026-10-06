@@ -16,6 +16,8 @@ export default function TrainingChat() {
   const [feedback, setFeedback] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  // The practice agent's "memory" (its order draft), round-tripped through the server.
+  const [state, setState] = useState<Record<string, unknown>>({});
   const nextId = useRef(1);
 
   const strip = (list: Turn[]): PracticeTurn[] => list.map(({ role, text }) => ({ role, text }));
@@ -30,7 +32,8 @@ export default function TrainingChat() {
     setInput("");
     setError(null);
     startTransition(async () => {
-      const res = await practiceReply(strip(history));
+      const res = await practiceReply(strip(history), state);
+      if (res.ok) setState(res.state);
       if (res.ok) setTurns((prev) => [...prev, { id: nextId.current++, role: "agent", text: res.text, notes: res.notes }]);
       else setError(res.error);
     });
@@ -186,6 +189,7 @@ export default function TrainingChat() {
             <button
               onClick={() => {
                 setTurns([]);
+                setState({});
                 setError(null);
               }}
               className="text-sm text-stone-400 px-2"
