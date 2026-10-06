@@ -139,40 +139,46 @@ export async function submitWebsiteOrder(input: SubmitOrderInput): Promise<Submi
     .single();
   if (error || !inserted) return { ok: false, error: "save_failed" };
 
-  if (clientId && client) {
-    await supabase
-      .from("clients")
-      .update({
-        last_order_at: new Date().toISOString(),
-        status: "active",
-        pipeline_stage: NEXT_STAGE[client.pipeline_stage] ?? client.pipeline_stage,
-      })
-      .eq("id", clientId);
-  }
+  // The order is saved. Everything below is bookkeeping and alerts: if any of it
+  // fails, the customer must still see their order as accepted.
+  try {
+    if (clientId && client) {
+      await supabase
+        .from("clients")
+        .update({
+          last_order_at: new Date().toISOString(),
+          status: "active",
+          pipeline_stage: NEXT_STAGE[client.pipeline_stage] ?? client.pipeline_stage,
+        })
+        .eq("id", clientId);
+    }
 
-  if (isTelegramConfigured()) {
-    const base = process.env.SITE_URL?.replace(/\/$/, "");
-    const status = needsReview ? "pending_review" : "new";
-    await notifyAdmin(
-      [
-        `Нове замовлення з сайту: ${data.customer_name} · ${total} ₴`,
-        summary.length > 300 ? `${summary.slice(0, 297)}...` : summary,
-        data.address,
-        data.phone,
-        needsReview ? "Потребує перевірки: замовлення не прив'язане до жодного клієнта." : "",
-      ]
-        .filter(Boolean)
-        .join("\n"),
-      {
-        buttons: [
-          [{ text: needsReview ? "👍 Перевірено" : "✅ Підтвердити", callback_data: `os:${inserted.id}:${status}` }],
-          ...(base ? [[{ text: "Відкрити в дашборді", url: `${base}/` }]] : []),
-        ],
-      }
-    );
-  }
+    if (isTelegramConfigured()) {
+      const base = process.env.SITE_URL?.replace(/\/$/, "");
+      const status = needsReview ? "pending_review" : "new";
+      await notifyAdmin(
+        [
+          `Нове замовлення з сайту: ${data.customer_name} · ${total} ₴`,
+          summary.length > 300 ? `${summary.slice(0, 297)}...` : summary,
+          data.address,
+          data.phone,
+          needsReview ? "Потребує перевірки: замовлення не прив'язане до жодного клієнта." : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        {
+          buttons: [
+            [{ text: needsReview ? "👍 Перевірено" : "✅ Підтвердити", callback_data: `os:${inserted.id}:${status}` }],
+            ...(base ? [[{ text: "Відкрити в дашборді", url: `${base}/` }]] : []),
+          ],
+        }
+      );
+    }
 
-  revalidatePath("/");
-  revalidatePath("/clients");
+    revalidatePath("/");
+    revalidatePath("/clients");
+  } catch (err) {
+    console.error("post-order side effects failed", err);
+  }
   return { ok: true };
 }

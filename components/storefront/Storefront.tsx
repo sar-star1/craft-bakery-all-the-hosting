@@ -174,20 +174,28 @@ export default function Storefront({
     setErrors({});
     setSubmitting(true);
 
-    const result = sampleMode
-      ? ({ ok: true } as const)
-      : await submitWebsiteOrder({
-          ref: refToken,
-          ...parsed.data,
-          lines: cartLines.map((l) => ({ item_id: l.id, qty: l.qty })),
-        });
+    let result: Awaited<ReturnType<typeof submitWebsiteOrder>>;
+    try {
+      result = sampleMode
+        ? { ok: true }
+        : await submitWebsiteOrder({
+            ref: refToken,
+            ...parsed.data,
+            lines: cartLines.map((l) => ({ item_id: l.id, qty: l.qty })),
+          });
+    } catch {
+      result = { ok: false, error: "network" };
+    }
     setSubmitting(false);
 
     if (!result.ok) {
       toast({
         title: "Не вдалося оформити замовлення",
         description:
-          result.issues?.join("; ") || "Спробуйте ще раз або звʼяжіться з нами напряму.",
+          result.issues?.join("; ") ||
+          (result.error === "network"
+            ? "Не вдалося підтвердити відповідь сервера. Оновіть сторінку й перевірте, чи замовлення не було прийнято, перш ніж надсилати ще раз."
+            : "Спробуйте ще раз або звʼяжіться з нами напряму."),
         variant: "destructive",
       });
       return;
@@ -500,7 +508,7 @@ export default function Storefront({
       )}
 
       <Dialog open={checkoutOpen} onOpenChange={setCheckoutOpen}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="font-display-black uppercase text-lg">Оформлення замовлення</DialogTitle>
             <DialogDescription className="font-body text-xs text-muted-foreground">
@@ -517,7 +525,10 @@ export default function Storefront({
             ) : (
               <ul className="space-y-1.5">
                 {cartLines.map((l) => (
-                  <li key={l.id} className="flex items-center justify-between gap-3 text-xs">
+                  <li
+                    key={l.id}
+                    className="grid grid-cols-[1rem_minmax(0,1fr)_auto_5.5rem] items-center gap-3 text-xs tabular-nums"
+                  >
                     <button
                       type="button"
                       onClick={() => setQty(l.id, 0)}
@@ -526,14 +537,14 @@ export default function Storefront({
                     >
                       <X className="h-3 w-3" />
                     </button>
-                    <span className="flex-1 truncate">
+                    <span className="truncate">
                       {l.name}
                       <span className="text-muted-foreground"> · {l.category}</span>
                     </span>
                     <span className="font-mono text-muted-foreground whitespace-nowrap">
                       {l.qty} × {formatUAH(l.unit)}
                     </span>
-                    <span className="font-mono whitespace-nowrap w-20 text-right">{formatUAH(l.subtotal)}</span>
+                    <span className="font-mono whitespace-nowrap text-right">{formatUAH(l.subtotal)}</span>
                   </li>
                 ))}
               </ul>
