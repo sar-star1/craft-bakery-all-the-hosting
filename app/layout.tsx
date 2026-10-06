@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Craft Bakery by Dubova — Orders",
-  description: "Admin CRM order pipeline for Craft Bakery by Dubova.",
+  title: "Peremoga Bakery — Orders",
+  description: "Admin CRM order pipeline for Peremoga Bakery.",
 };
 
 export default function RootLayout({

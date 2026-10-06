@@ -1,4 +1,4 @@
--- Craft Bakery by Dubova — CRM + AI agent schema
+-- Peremoga Bakery — CRM + AI agent schema
 -- Run this in the Supabase SQL editor. Standard-Telegram-bot version —
 -- replaces the earlier Business Connection-based schema.
 

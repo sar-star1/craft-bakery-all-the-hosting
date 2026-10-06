@@ -46,7 +46,7 @@ export async function draftOutbound(input: {
   const response = await getAnthropic().messages.create({
     model: AGENT_MODEL,
     max_tokens: 2000,
-    system: `Ти пишеш одне коротке повідомлення в Telegram від крафтової пекарні Craft Bakery by Dubova для B2B-клієнта. Українською, тепло й по-діловому, 2–4 речення, звичайний текст без markdown. ${KIND_INSTRUCTIONS[input.kind]}
+    system: `Ти пишеш одне коротке повідомлення в Telegram від пекарні Peremoga Bakery для B2B-клієнта. Українською, тепло й по-діловому, 2–4 речення, звичайний текст без markdown. ${KIND_INSTRUCTIONS[input.kind]}
 
 ПРАВИЛА
 - Не називай жодних цін, знижок, сум чи строків, окрім тих, що прямо наведені в тексті пропозиції нижче (якщо він є).

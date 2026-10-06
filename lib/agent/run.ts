@@ -166,8 +166,8 @@ async function handleStart(msg: TelegramMessage, payload: string) {
 
   const who = client.contact_name ? `, ${client.contact_name}` : "";
   const greeting = isNew
-    ? `Вітаю${who}! Це асистент Craft Bakery by Dubova. Розкажіть, будь ласка, про ваш заклад: як він називається і що плануєте замовляти?`
-    : `Вітаю${who}! Це асистент Craft Bakery by Dubova. Пишіть сюди щодо замовлень — допоможу з меню, цінами та доставкою.`;
+    ? `Вітаю${who}! Це асистент Peremoga Bakery. Розкажіть, будь ласка, про ваш заклад: як він називається і що плануєте замовляти?`
+    : `Вітаю${who}! Це асистент Peremoga Bakery. Пишіть сюди щодо замовлень — допоможу з меню, цінами та доставкою.`;
   const sent = await sendTelegramMessage(chatId, greeting);
   if (sent.ok) await logOutgoing(db, client.id, null, greeting, sent.messageId);
 }

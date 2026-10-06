@@ -32,7 +32,7 @@ export async function registerTelegramWebhook(): Promise<SetupActionResult> {
 
 export async function sendAdminTestMessage(): Promise<SetupActionResult> {
   await requireAdmin();
-  const res = await notifyAdmin("✅ Тестове повідомлення від бота Craft Bakery. Якщо ви це бачите — адмін-група підключена.");
+  const res = await notifyAdmin("✅ Тестове повідомлення від бота Peremoga Bakery. Якщо ви це бачите — адмін-група підключена.");
   return res.ok
     ? { ok: true, message: "Надіслано в адмін-групу." }
     : { ok: false, message: res.error ?? "Не вдалося надіслати (бот у групі? правильний ID?)." };

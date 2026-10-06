@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { z } from "zod";
 import { Info, Minus, Plus, ShoppingCart, Snowflake, Tag, X } from "lucide-react";
 import { submitWebsiteOrder } from "@/app/order-actions";
+import { MIN_ORDER_TOTAL_UAH } from "@/lib/orderRules";
 import { formatUAH, type StoreData, type StoreItem } from "@/lib/storefront";
 import { toast } from "./use-toast";
 import { Toaster } from "./ui/toaster";
@@ -136,6 +137,9 @@ export default function Storefront({
       const own = itemById.get(l.id)?.item.minOrder;
       return own && l.qty < own ? [`${l.name} — мінімум ${own} шт.`] : [];
     }),
+    ...(cartLines.length > 0 && totalUah < MIN_ORDER_TOTAL_UAH
+      ? [`Мінімальна сума замовлення — ${formatUAH(MIN_ORDER_TOTAL_UAH)} (зараз ${formatUAH(totalUah)})`]
+      : []),
   ];
   const canCheckout = cartLines.length > 0 && blockingIssues.length === 0;
 
