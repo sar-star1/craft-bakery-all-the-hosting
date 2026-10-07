@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { z } from "zod";
 import { Info, Minus, Plus, ShoppingCart, Snowflake, Tag, X } from "lucide-react";
 import { submitWebsiteOrder } from "@/app/order-actions";
-import { MIN_ORDER_TOTAL_UAH } from "@/lib/orderRules";
+import { deliveryFor, type OrderingRules } from "@/lib/orderRules";
 import { formatUAH, type StoreData, type StoreItem } from "@/lib/storefront";
 import { toast } from "./use-toast";
 import { Toaster } from "./ui/toaster";
@@ -26,14 +26,16 @@ const slugify = (name: string) =>
     .replace(/^-|-$/g, "");
 
 const checkoutSchema = z.object({
-  customer_name: z.string().trim().min(1, "Вкажіть імʼя").max(120),
+  customer_name: z.string().trim().min(1, "Вкажіть назву кав'ярні").max(120),
+  fop: z.string().trim().min(2, "Вкажіть ФОП").max(200),
+  payment_method: z.enum(["cash", "cashless"], { message: "Оберіть вид оплати" }),
   phone: z
     .string()
     .trim()
     .min(5, "Вкажіть телефон")
     .max(40)
     .regex(/^[+\d\s()-]+$/, "Некоректний телефон"),
-  email: z.string().trim().email("Некоректний email").max(255),
+  email: z.string().trim().email("Некоректний email").max(255).optional().or(z.literal("")),
   address: z.string().trim().min(3, "Вкажіть адресу доставки").max(500),
   notes: z.string().trim().max(1000).optional(),
 });
@@ -52,11 +54,16 @@ export default function Storefront({
   data,
   refToken,
   prefillName,
+  rules,
+  profile,
   sampleMode = false,
 }: {
   data: StoreData;
   refToken?: string;
   prefillName?: string;
+  rules: OrderingRules;
+  // What we remember about this client (from earlier orders).
+  profile?: { fop?: string; address?: string; payment_method?: "cash" | "cashless"; phone?: string };
   sampleMode?: boolean;
 }) {
   const { categories, promo, terms } = data;
@@ -67,9 +74,11 @@ export default function Storefront({
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
     customer_name: prefillName ?? "",
-    phone: "",
+    fop: profile?.fop ?? "",
+    payment_method: (profile?.payment_method ?? "") as "" | "cash" | "cashless",
+    phone: profile?.phone ?? "",
     email: "",
-    address: "",
+    address: profile?.address ?? "",
     notes: "",
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -128,6 +137,9 @@ export default function Storefront({
 
   const totalUah = cartLines.reduce((s, l) => s + l.subtotal, 0);
   const totalUnits = cartLines.reduce((s, l) => s + l.qty, 0);
+  const deliveryFee = cartLines.length > 0 ? deliveryFor(totalUah, rules) : 0;
+  const toFreeDelivery = deliveryFee > 0 ? rules.free_delivery_from - totalUah : 0;
+  const payTotal = totalUah + deliveryFee;
 
   // Minimums are per group: the sum of all items in a category (excluding
   // items that carry their own individual minimum) must reach the category
@@ -154,8 +166,8 @@ export default function Storefront({
       const own = itemById.get(l.id)?.item.minOrder;
       return own && l.qty < own ? [`${l.name} — мінімум ${own} шт.`] : [];
     }),
-    ...(cartLines.length > 0 && totalUah < MIN_ORDER_TOTAL_UAH
-      ? [`Мінімальна сума замовлення — ${formatUAH(MIN_ORDER_TOTAL_UAH)} (зараз ${formatUAH(totalUah)})`]
+    ...(cartLines.length > 0 && totalUah < rules.min_order_total
+      ? [`Мінімальна сума замовлення — ${formatUAH(rules.min_order_total)} (зараз ${formatUAH(totalUah)})`]
       : []),
   ];
   const canCheckout = cartLines.length > 0 && blockingIssues.length === 0;
@@ -224,7 +236,7 @@ export default function Storefront({
         : "Ми звʼяжемось з вами найближчим часом для підтвердження.",
     });
     setCart({});
-    setForm({ customer_name: prefillName ?? "", phone: "", email: "", address: "", notes: "" });
+    setForm((f) => ({ ...f, notes: "" }));
     setCheckoutOpen(false);
   };
 
@@ -566,15 +578,35 @@ export default function Storefront({
                 ))}
               </ul>
             )}
-            <div className="flex items-center justify-between border-t border-border pt-2 font-mono text-sm">
-              <span className="font-display-black uppercase tracking-[0.2em] text-xs">Разом</span>
+            <div className="flex items-center justify-between border-t border-border pt-2 font-mono text-xs text-muted-foreground">
+              <span>Товари</span>
               <span>{formatUAH(totalUah)}</span>
+            </div>
+            {cartLines.length > 0 && (
+              <div className="flex items-center justify-between font-mono text-xs text-muted-foreground">
+                <span>Доставка</span>
+                <span>{deliveryFee === 0 ? "безкоштовно" : formatUAH(deliveryFee)}</span>
+              </div>
+            )}
+            {toFreeDelivery > 0 && (
+              <p className="text-[11px] text-primary">
+                Додайте товарів ще на {formatUAH(toFreeDelivery)} — і доставка буде безкоштовною.
+              </p>
+            )}
+            <div className="flex items-center justify-between border-t border-border pt-2 font-mono text-sm">
+              <span className="font-display-black uppercase tracking-[0.2em] text-xs">До сплати</span>
+              <span>{formatUAH(payTotal)}</span>
             </div>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-3">
+            {profile && (profile.fop || profile.address) && (
+              <p className="text-[11px] text-muted-foreground border border-border p-2">
+                Дані підставлено з вашого попереднього замовлення — перевірте, чи вони ті самі.
+              </p>
+            )}
             <div>
-              <Label htmlFor="customer_name">Імʼя / Компанія *</Label>
+              <Label htmlFor="customer_name">Назва кав'ярні *</Label>
               <Input
                 id="customer_name"
                 value={form.customer_name}
@@ -583,6 +615,17 @@ export default function Storefront({
                 required
               />
               {errors.customer_name && <p className="text-xs text-destructive mt-1">{errors.customer_name}</p>}
+            </div>
+            <div>
+              <Label htmlFor="fop">ФОП *</Label>
+              <Input
+                id="fop"
+                value={form.fop}
+                onChange={(e) => setForm({ ...form, fop: e.target.value })}
+                maxLength={200}
+                required
+              />
+              {errors.fop && <p className="text-xs text-destructive mt-1">{errors.fop}</p>}
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
@@ -598,14 +641,13 @@ export default function Storefront({
                 {errors.phone && <p className="text-xs text-destructive mt-1">{errors.phone}</p>}
               </div>
               <div>
-                <Label htmlFor="email">Email *</Label>
+                <Label htmlFor="email">Email</Label>
                 <Input
                   id="email"
                   type="email"
                   value={form.email}
                   onChange={(e) => setForm({ ...form, email: e.target.value })}
                   maxLength={255}
-                  required
                 />
                 {errors.email && <p className="text-xs text-destructive mt-1">{errors.email}</p>}
               </div>
@@ -620,6 +662,29 @@ export default function Storefront({
                 required
               />
               {errors.address && <p className="text-xs text-destructive mt-1">{errors.address}</p>}
+            </div>
+            <div>
+              <Label>Вид оплати *</Label>
+              <div className="flex gap-5 mt-1.5">
+                {(
+                  [
+                    ["cash", "Готівка"],
+                    ["cashless", "Безготівка"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <label key={value} className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="radio"
+                      name="payment_method"
+                      value={value}
+                      checked={form.payment_method === value}
+                      onChange={() => setForm({ ...form, payment_method: value })}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+              {errors.payment_method && <p className="text-xs text-destructive mt-1">{errors.payment_method}</p>}
             </div>
             <div>
               <Label htmlFor="notes">Коментар (необовʼязково)</Label>

@@ -86,6 +86,16 @@ export default function TrainingChat() {
           характеру агент запам&apos;ятає як правило, а відповіді, які ви схвалили чи написали самі, стануть прикладами.
         </p>
 
+        <label className="flex items-center gap-2 text-[13px] text-stone-600 mb-4">
+          <input
+            type="checkbox"
+            checked={state.practice_repeat === true}
+            disabled={turns.length > 0}
+            onChange={(e) => setState({ ...state, practice_repeat: e.target.checked })}
+          />
+          Імітувати постійного клієнта (3 замовлення, дані ФОП/адреса/оплата збережені)
+        </label>
+
         <div className="space-y-3 mb-4">
           {turns.length === 0 && (
             <p className="text-sm text-stone-400">
@@ -189,7 +199,7 @@ export default function TrainingChat() {
             <button
               onClick={() => {
                 setTurns([]);
-                setState({});
+                setState((s) => (s.practice_repeat === true ? { practice_repeat: true } : {}));
                 setError(null);
               }}
               className="text-sm text-stone-400 px-2"

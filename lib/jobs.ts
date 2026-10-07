@@ -3,6 +3,7 @@ import { draftOutbound, type OutboundKind } from "@/lib/agent/draft";
 import { isAnthropicConfigured } from "@/lib/agent/anthropic";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { announceDrafts } from "@/lib/adminAlerts";
+import type { Attachment } from "@/lib/types";
 import { getActiveGuidelines } from "@/lib/agent/guidelines";
 
 type Db = ReturnType<typeof createSupabaseServerClient>;
@@ -39,7 +40,13 @@ async function recentOrderSummaries(db: Db, clientId: string, limit = 5): Promis
   return (data ?? []).map((o) => `${String(o.created_at).slice(0, 10)}: ${o.item_summary_uk}`);
 }
 
-async function queueDraft(db: Db, client: JobClient, kind: OutboundKind, offerText?: string): Promise<string | null> {
+async function queueDraft(
+  db: Db,
+  client: JobClient,
+  kind: OutboundKind,
+  offerText?: string,
+  attachments: Attachment[] = []
+): Promise<string | null> {
   const text = await draftOutbound({
     kind,
     clientId: client.id,
@@ -55,7 +62,7 @@ async function queueDraft(db: Db, client: JobClient, kind: OutboundKind, offerTe
   if (!text) return null;
   const { data } = await db
     .from("pending_replies")
-    .insert({ client_id: client.id, draft_text: text, reply_type: kind })
+    .insert({ client_id: client.id, draft_text: text, reply_type: kind, attachments })
     .select("id")
     .single();
   return (data?.id as string | undefined) ?? null;
@@ -158,7 +165,11 @@ export async function runRemarketing(): Promise<JobResult> {
 export type OfferSegment = "all" | "active" | "dormant";
 
 // Manually triggered from the dashboard when there's a real seasonal offer.
-export async function createSeasonalOfferDrafts(offerText: string, segment: OfferSegment): Promise<JobResult> {
+export async function createSeasonalOfferDrafts(
+  offerText: string,
+  segment: OfferSegment,
+  attachments: Attachment[] = []
+): Promise<JobResult> {
   if (!isAnthropicConfigured()) return { ok: false, skipped: "ANTHROPIC_API_KEY not set" };
   const db = createSupabaseServerClient();
 
@@ -171,7 +182,7 @@ export async function createSeasonalOfferDrafts(offerText: string, segment: Offe
   const draftIds: string[] = [];
   const CONCURRENCY = 5;
   for (let i = 0; i < list.length; i += CONCURRENCY) {
-    const results = await Promise.all(list.slice(i, i + CONCURRENCY).map((c) => queueDraft(db, c, "seasonal_offer", offerText)));
+    const results = await Promise.all(list.slice(i, i + CONCURRENCY).map((c) => queueDraft(db, c, "seasonal_offer", offerText, attachments)));
     for (const id of results) if (id) draftIds.push(id);
   }
 

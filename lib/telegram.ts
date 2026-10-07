@@ -63,6 +63,23 @@ export function editTelegramMessage(chatId: string, messageId: number, text: str
   });
 }
 
+// Sends a stored file to a chat: photos as photos, everything else as documents.
+export async function sendTelegramFile(
+  chatId: string,
+  file: { url: string; name: string; type: string }
+): Promise<{ ok: boolean; error?: string; messageId?: number }> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return { ok: false, error: "TELEGRAM_BOT_TOKEN is not configured." };
+  const asPhoto = /^image\/(jpeg|png|webp)$/.test(file.type);
+  const res = await fetch(`https://api.telegram.org/bot${token}/${asPhoto ? "sendPhoto" : "sendDocument"}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, [asPhoto ? "photo" : "document"]: file.url }),
+  });
+  const json = await res.json();
+  return json.ok ? { ok: true, messageId: json.result?.message_id } : { ok: false, error: json.description ?? "Telegram API error" };
+}
+
 // Best-effort "typing…" indicator while the agent thinks.
 export async function sendTypingAction(chatId: string): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN;

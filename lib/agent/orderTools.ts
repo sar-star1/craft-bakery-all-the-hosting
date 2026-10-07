@@ -1,13 +1,21 @@
 import "server-only";
 import type Anthropic from "@anthropic-ai/sdk";
-import { announceNewOrder, markClientOrdered, priceOrderLines } from "@/lib/orders";
+import { PAYMENT_LABEL, type PaymentMethod } from "@/lib/orderRules";
+import {
+  announceNewOrder,
+  getClientProfile,
+  markClientOrdered,
+  priceOrderLines,
+  saveClientProfile,
+  type ClientProfile,
+} from "@/lib/orders";
 import type { ToolContext } from "./tools";
 
 // Taking an order in chat. The cart lives in the conversation (or, in the
 // dashboard's practice chat, in a state object that round-trips through the
 // browser). The agent never states prices itself: every figure it gives comes
 // from review_order, which prices the cart from the live menu with exactly the
-// same rules as the website.
+// same rules as the website — delivery fee included.
 
 interface DraftLine {
   item_id: string;
@@ -16,7 +24,10 @@ interface DraftLine {
 }
 interface OrderDraft {
   lines: DraftLine[];
+  venue_name?: string; // назва кав'ярні
+  fop?: string;
   address?: string;
+  payment_method?: PaymentMethod;
   phone?: string;
   requested_date?: string;
   notes?: string;
@@ -38,7 +49,7 @@ export const ORDER_TOOLS: Anthropic.Tool[] = [
   {
     name: "update_order_draft",
     description:
-      "Build or change the order being put together in this chat. `items` upserts by item id (qty 0 removes an item); address, phone, requested_date (YYYY-MM-DD) and notes are saved as given. Any change requires showing the client a fresh summary again. Item ids come from get_menu or get_price.",
+      "Build or change the order being put together in this chat. `items` upserts by item id (qty 0 removes an item). Also saves the order details: venue_name (назва кав'ярні), fop, address, payment_method ('cash' or 'cashless'), phone, requested_date (YYYY-MM-DD), notes. For a returning client use use_saved_profile: true to fill venue/ФОП/address/payment/phone from what we remember, and repeat_last_order: true to start from their previous order. Any change requires showing the client a fresh summary again.",
     input_schema: {
       type: "object",
       properties: {
@@ -50,10 +61,15 @@ export const ORDER_TOOLS: Anthropic.Tool[] = [
             required: ["item_id", "qty"],
           },
         },
+        venue_name: { type: "string", description: "Назва кав'ярні / закладу" },
+        fop: { type: "string", description: "ФОП (the legal entity / payer)" },
         address: { type: "string", description: "Delivery address" },
-        phone: { type: "string", description: "Recipient's phone number" },
+        payment_method: { type: "string", enum: ["cash", "cashless"], description: "cash = готівка, cashless = безготівка" },
+        phone: { type: "string", description: "Recipient's phone number (optional)" },
         requested_date: { type: "string", description: "Wanted delivery date, YYYY-MM-DD" },
         notes: { type: "string", description: "Comment for the bakery" },
+        use_saved_profile: { type: "boolean", description: "Fill the details from what we remember about this client" },
+        repeat_last_order: { type: "boolean", description: "Start the cart from this client's previous order" },
         clear: { type: "boolean", description: "Discard the whole draft (client changed their mind)" },
       },
     },
@@ -61,7 +77,7 @@ export const ORDER_TOOLS: Anthropic.Tool[] = [
   {
     name: "review_order",
     description:
-      "Price and check the current draft against the menu and ordering rules. Returns the lines, the total, any rule problems (minimums), and what is still missing. The ONLY valid source for the order summary you show the client — and you MUST show it and get an explicit yes before place_order.",
+      "Price and check the current draft against the menu and ordering rules. Returns the lines, the goods total, the delivery fee (free above the threshold), how much more is needed for free delivery, any rule problems (minimums), and what is still missing. The ONLY valid source for the order summary you show the client — and you MUST show it and get an explicit yes before place_order.",
     input_schema: { type: "object", properties: {} },
   },
   {
@@ -85,7 +101,7 @@ function json(value: unknown): string {
 
 async function loadDraft(ctx: ToolContext): Promise<OrderDraft> {
   const empty: OrderDraft = { lines: [] };
-  if (ctx.dryRun) return ((ctx.practiceState?.draft_order as OrderDraft | undefined) ?? empty);
+  if (ctx.dryRun) return (ctx.practiceState?.draft_order as OrderDraft | undefined) ?? empty;
   const { data } = await ctx.supabase.from("conversations").select("captured_fields").eq("id", ctx.conversationId).maybeSingle();
   return ((data?.captured_fields as Record<string, unknown> | null)?.draft_order as OrderDraft | undefined) ?? empty;
 }
@@ -105,13 +121,23 @@ async function saveDraft(ctx: ToolContext, draft: OrderDraft | null) {
   await ctx.supabase.from("conversations").update({ captured_fields: fields }).eq("id", ctx.conversationId);
 }
 
+async function savedProfile(ctx: ToolContext): Promise<ClientProfile & { business_name?: string }> {
+  if (ctx.dryRun) return (ctx.practiceState?.profile as ClientProfile | undefined) ?? {};
+  return getClientProfile(ctx.supabase, ctx.client.id);
+}
+
+// Phone is optional; everything else the bakery needs to deliver and invoice.
 function missingFields(draft: OrderDraft): string[] {
   const missing: string[] = [];
   if (draft.lines.length === 0) missing.push("items");
+  if (!draft.venue_name) missing.push("venue name (назва кав'ярні)");
+  if (!draft.fop) missing.push("ФОП");
   if (!draft.address) missing.push("delivery address");
-  if (!draft.phone) missing.push("recipient phone");
+  if (!draft.payment_method) missing.push("payment method (cash / cashless)");
   return missing;
 }
+
+const trimmed = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) || undefined : undefined);
 
 export async function runOrderTool(name: string, args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
   const { supabase, client } = ctx;
@@ -150,8 +176,45 @@ export async function runOrderTool(name: string, args: Record<string, unknown>, 
         return "Draft cleared.";
       }
       const draft = await loadDraft(ctx);
-      const items = Array.isArray(args.items) ? (args.items as { item_id?: unknown; qty?: unknown }[]) : [];
 
+      if (args.use_saved_profile === true) {
+        const p = await savedProfile(ctx);
+        draft.venue_name = p.venue_name ?? p.business_name ?? draft.venue_name;
+        draft.fop = p.fop ?? draft.fop;
+        draft.address = p.delivery_address ?? draft.address;
+        draft.payment_method = p.payment_method ?? draft.payment_method;
+        draft.phone = p.phone ?? draft.phone;
+      }
+
+      if (args.repeat_last_order === true) {
+        if (ctx.dryRun) return "Practice mode: 'repeat last order' isn't simulated — add the items by hand.";
+        const { data: last } = await supabase
+          .from("orders")
+          .select("item_details_uk")
+          .eq("client_id", client.id)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        const prev = ((last?.item_details_uk as { items?: { item_id?: string; name: string; qty: number }[] } | null)?.items ?? []);
+        if (!prev.length) return "This client has no previous order to repeat.";
+        const { data: menu } = await supabase.from("menu_items").select("id, name_uk, is_active");
+        const byId = new Map((menu ?? []).map((m) => [m.id as string, m]));
+        const byName = new Map((menu ?? []).map((m) => [String(m.name_uk), m]));
+        const dropped: string[] = [];
+        for (const l of prev) {
+          const m = (l.item_id && byId.get(l.item_id)) || byName.get(l.name);
+          if (!m || !m.is_active) {
+            dropped.push(l.name);
+            continue;
+          }
+          const existing = draft.lines.find((x) => x.item_id === m.id);
+          if (existing) existing.qty = l.qty;
+          else draft.lines.push({ item_id: m.id as string, name: m.name_uk as string, qty: l.qty });
+        }
+        if (dropped.length) args.__dropped = dropped;
+      }
+
+      const items = Array.isArray(args.items) ? (args.items as { item_id?: unknown; qty?: unknown }[]) : [];
       const wanted = items.filter((i) => typeof i.item_id === "string");
       if (wanted.length) {
         const { data: rows } = await supabase
@@ -176,16 +239,27 @@ export async function runOrderTool(name: string, args: Record<string, unknown>, 
           return `Not saved — these ids are not on the menu: ${unknown.join(", ")}. Look the items up with get_menu or get_price first.`;
         }
       }
-      if (typeof args.address === "string") draft.address = args.address.trim().slice(0, 500) || undefined;
-      if (typeof args.phone === "string") draft.phone = args.phone.trim().slice(0, 40) || undefined;
-      if (typeof args.notes === "string") draft.notes = args.notes.trim().slice(0, 1000) || undefined;
+
+      if ("venue_name" in args) draft.venue_name = trimmed(args.venue_name, 120);
+      if ("fop" in args) draft.fop = trimmed(args.fop, 200);
+      if ("address" in args) draft.address = trimmed(args.address, 500);
+      if ("phone" in args) draft.phone = trimmed(args.phone, 40);
+      if ("notes" in args) draft.notes = trimmed(args.notes, 1000);
+      if ("payment_method" in args) draft.payment_method = args.payment_method === "cash" || args.payment_method === "cashless" ? args.payment_method : undefined;
       if (typeof args.requested_date === "string") {
         const d = args.requested_date.trim();
         draft.requested_date = /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(d)) ? d : undefined;
       }
       draft.summary_at_inbound = undefined; // anything changed → must be re-shown and re-confirmed
       await saveDraft(ctx, draft);
-      return json({ saved: true, items_in_draft: draft.lines.length, missing: missingFields(draft), next: "Call review_order and show the client the summary." });
+      return json({
+        saved: true,
+        items_in_draft: draft.lines.length,
+        ...(Array.isArray(args.__dropped) ? { no_longer_on_menu: args.__dropped } : {}),
+        details: { venue_name: draft.venue_name ?? null, fop: draft.fop ?? null, address: draft.address ?? null, payment_method: draft.payment_method ? PAYMENT_LABEL[draft.payment_method] : null },
+        missing: missingFields(draft),
+        next: "Call review_order and show the client the summary.",
+      });
     }
 
     case "review_order": {
@@ -197,10 +271,23 @@ export async function runOrderTool(name: string, args: Record<string, unknown>, 
 
       draft.summary_at_inbound = ctx.inboundCount;
       await saveDraft(ctx, draft);
+      const toFree = priced.delivery_fee > 0 ? priced.rules.free_delivery_from - priced.total : 0;
       return json({
         lines: priced.lines.map((l) => ({ name: l.name, qty: l.qty, unit_price_uah: l.unit_price, subtotal_uah: l.subtotal })),
-        total_uah: priced.total,
-        delivery: { address: draft.address ?? null, phone: draft.phone ?? null, requested_date: draft.requested_date ?? null, notes: draft.notes ?? null },
+        goods_total_uah: priced.total,
+        delivery_fee_uah: priced.delivery_fee,
+        grand_total_uah: priced.grand_total,
+        free_delivery_from_uah: priced.rules.free_delivery_from,
+        ...(toFree > 0 ? { add_for_free_delivery_uah: toFree } : {}),
+        details: {
+          venue_name: draft.venue_name ?? null,
+          fop: draft.fop ?? null,
+          address: draft.address ?? null,
+          payment: draft.payment_method ? PAYMENT_LABEL[draft.payment_method] : null,
+          phone: draft.phone ?? null,
+          requested_date: draft.requested_date ?? null,
+          notes: draft.notes ?? null,
+        },
         missing,
         ready_for_confirmation: missing.length === 0,
         next: missing.length
@@ -221,9 +308,10 @@ export async function runOrderTool(name: string, args: Record<string, unknown>, 
       if (!priced.ok) return `Not placed: ${priced.issues.join("; ")}`;
 
       const summary = priced.lines.map((l) => `${l.name} ×${l.qty}`).join(", ");
+      const summaryShort = summary.length > 240 ? `${summary.slice(0, 237)}...` : summary;
       if (ctx.dryRun) {
         await saveDraft(ctx, null);
-        return `Practice mode: the order would be placed now (${summary}, ${priced.total} UAH). Nothing was saved. Tell the client it's accepted and a manager will confirm details and date.`;
+        return `Practice mode: the order would be placed now (${summary}; goods ${priced.total} UAH + delivery ${priced.delivery_fee} UAH = ${priced.grand_total} UAH). Nothing was saved. Tell the client it's accepted and a manager will confirm details and date.`;
       }
 
       // Guard against a double-send: same client, same total and items, last 15 minutes.
@@ -232,8 +320,8 @@ export async function runOrderTool(name: string, args: Record<string, unknown>, 
         .from("orders")
         .select("id")
         .eq("client_id", client.id)
-        .eq("total_amount", priced.total)
-        .eq("item_summary_uk", summary.length > 240 ? `${summary.slice(0, 237)}...` : summary)
+        .eq("total_amount", priced.grand_total)
+        .eq("item_summary_uk", summaryShort)
         .gte("created_at", since)
         .limit(1);
       if (recent?.length) {
@@ -248,19 +336,24 @@ export async function runOrderTool(name: string, args: Record<string, unknown>, 
         .insert({
           client_id: client.id,
           source: "telegram",
-          customer_name: client.business_name,
-          customer_contact: draft.phone,
-          item_summary_uk: summary.length > 240 ? `${summary.slice(0, 237)}...` : summary,
+          customer_name: draft.venue_name,
+          customer_contact: draft.phone ?? null,
+          item_summary_uk: summaryShort,
           item_details_uk: {
             notes: draft.notes,
             items: priced.lines,
+            venue_name: draft.venue_name,
+            fop: draft.fop,
             address: draft.address,
+            payment_method: draft.payment_method,
             phone: draft.phone,
             requested_date: draft.requested_date,
+            delivery_fee: priced.delivery_fee,
+            goods_total: priced.total,
           },
           status: "new",
           deposit_status: "n/a",
-          total_amount: priced.total,
+          total_amount: priced.grand_total,
           due_date: dueDate,
         })
         .select("id")
@@ -272,22 +365,33 @@ export async function runOrderTool(name: string, args: Record<string, unknown>, 
 
       await saveDraft(ctx, null);
       try {
+        // Remember the details so the next order only needs a "still the same?".
+        await saveClientProfile(supabase, client.id, {
+          venue_name: draft.venue_name,
+          fop: draft.fop,
+          delivery_address: draft.address,
+          payment_method: draft.payment_method,
+          phone: draft.phone,
+        });
         await markClientOrdered(supabase, client.id);
         await announceNewOrder({
           orderId: inserted.id as string,
           origin: "чату",
-          customerName: client.business_name,
-          total: priced.total,
-          summary,
+          venueName: draft.venue_name!,
+          fop: draft.fop,
           address: draft.address,
+          paymentMethod: draft.payment_method,
           phone: draft.phone,
+          total: priced.grand_total,
+          deliveryFee: priced.delivery_fee,
+          summary,
           needsReview: false,
           note: draft.requested_date ? `Бажана дата: ${draft.requested_date}` : undefined,
         });
       } catch (err) {
         console.error("post-order side effects failed", err);
       }
-      return `Order placed (${summary}, ${priced.total} UAH). Tell the client it's accepted and that a manager will confirm the details and delivery date. Do not promise a specific time.`;
+      return `Order placed (${summary}; goods ${priced.total} UAH + delivery ${priced.delivery_fee} UAH = ${priced.grand_total} UAH). Tell the client it's accepted and that a manager will confirm the details and delivery date. Do not promise a specific time.`;
     }
 
     default:

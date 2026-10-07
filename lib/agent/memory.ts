@@ -1,6 +1,8 @@
 import "server-only";
 import type { createSupabaseServerClient } from "@/lib/supabase/server";
 
+import { formatValidity, todayKyiv } from "./validity";
+
 type Db = ReturnType<typeof createSupabaseServerClient>;
 
 export type ExampleQuality = "approved" | "edited" | "written";
@@ -15,16 +17,25 @@ export interface Example {
 export async function getKnowledge(db: Db): Promise<string[]> {
   const { data } = await db
     .from("agent_knowledge")
-    .select("text")
+    .select("text, expires_at")
+    .or(`expires_at.is.null,expires_at.gte.${todayKyiv()}`)
     .order("created_at", { ascending: true })
     .limit(60);
-  return (data ?? []).map((r) => String(r.text));
+  return (data ?? []).map((r) => {
+    const until = formatValidity(r.expires_at as string | null);
+    return until ? `${r.text} (${until})` : String(r.text);
+  });
 }
 
-export async function addKnowledge(db: Db, text: string, source: "manual" | "admin_group"): Promise<string | null> {
+export async function addKnowledge(
+  db: Db,
+  text: string,
+  source: "manual" | "admin_group" | "teach" | "history_import",
+  expiresAt: string | null = null
+): Promise<string | null> {
   const clean = text.trim().slice(0, 600);
   if (!clean) return null;
-  const { data } = await db.from("agent_knowledge").insert({ text: clean, source }).select("id").single();
+  const { data } = await db.from("agent_knowledge").insert({ text: clean, source, expires_at: expiresAt }).select("id").single();
   return (data?.id as string | undefined) ?? null;
 }
 

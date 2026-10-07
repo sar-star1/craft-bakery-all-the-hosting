@@ -61,6 +61,19 @@ export default function PendingReplyCard({
       </div>
       {clientName && <p className="text-[12px] text-stone-600 font-medium mb-1">{clientName}</p>}
       <p className="text-stone-700 text-sm mb-1">{reply.draft_text}</p>
+      {reply.attachments && reply.attachments.length > 0 && (
+        <p className="text-[12px] text-stone-500 mb-1">
+          📎{" "}
+          {reply.attachments.map((f, i) => (
+            <span key={`${f.url}-${i}`}>
+              {i > 0 && ", "}
+              <a href={f.url} target="_blank" rel="noreferrer" className="underline">
+                {f.name}
+              </a>
+            </span>
+          ))}
+        </p>
+      )}
       <p className="text-[11px] text-stone-400 mb-2">{formatDateTime(reply.created_at, lang)}</p>
 
       {status === "awaiting_approval" ? (

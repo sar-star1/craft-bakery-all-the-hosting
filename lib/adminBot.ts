@@ -3,6 +3,8 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { buildDraftAlert } from "@/lib/adminAlerts";
 import { addGuideline, getActiveGuidelines } from "@/lib/agent/guidelines";
 import { addKnowledge } from "@/lib/agent/memory";
+import { teachFromText } from "@/lib/agent/teach";
+import { formatValidity, parseValidity } from "@/lib/agent/validity";
 import { isAnthropicConfigured } from "@/lib/agent/anthropic";
 import { reviseDraft } from "@/lib/agent/revise";
 import { answerCallbackQuery, editTelegramMessage, notifyAdmin } from "@/lib/telegram";
@@ -132,7 +134,7 @@ async function handleReplyToDraft(msg: NonNullable<TelegramUpdate["message"]>) {
 
   const { data: draft } = await db
     .from("pending_replies")
-    .select("id, client_id, draft_text, status, reply_type")
+    .select("id, client_id, draft_text, status, reply_type, attachments")
     .eq("admin_message_id", target.message_id)
     .maybeSingle();
   if (!draft) return;
@@ -195,6 +197,7 @@ async function handleReplyToDraft(msg: NonNullable<TelegramUpdate["message"]>) {
       replyType: draft.reply_type as string,
       text: revision.text,
       clientMessage,
+      attachments: (draft.attachments as { name: string }[] | null) ?? [],
       note: `✏️ Переписано за зауваженням · ${actor}`,
     });
     await editTelegramMessage(chat, target.message_id, alert.text, alert.buttons);
@@ -218,33 +221,63 @@ async function handleReplyToDraft(msg: NonNullable<TelegramUpdate["message"]>) {
   }
 }
 
-// /rule <text> teaches the agent how to behave or sound; /fact <text> teaches
-// it something about the business. Both are typed straight in the admin group.
+// Typed straight in the admin group:
+//   /rule <text>   how the agent should behave or sound
+//   /fact <text>   something it should know about the bakery
+//   /teach <text>  say it in plain words — it decides rule / fact / ordering number
+// A leading "до 12.10", "цього тижня", "завтра" makes a rule or fact temporary.
 async function handleTeachCommand(msg: NonNullable<TelegramUpdate["message"]>): Promise<boolean> {
-  const match = (msg.text ?? "").match(/^\/(rule|fact)(?:@\w+)?(?:\s+([\s\S]*))?$/i);
+  const match = (msg.text ?? "").match(/^\/(rule|fact|teach)(?:@\w+)?(?:\s+([\s\S]*))?$/i);
   if (!match) return false;
   const kind = match[1].toLowerCase();
   const body = (match[2] ?? "").trim();
+  const reply = { replyTo: msg.message_id };
   if (!body) {
     await notifyAdmin(
       kind === "rule"
         ? "Напишіть правило після команди, напр.: /rule Звертайся до клієнтів на «ви» і не використовуй емодзі."
-        : "Напишіть факт після команди, напр.: /fact Ми не приймаємо замовлення на торти за індивідуальним дизайном.",
-      { replyTo: msg.message_id }
+        : kind === "fact"
+          ? "Напишіть факт після команди, напр.: /fact цього тижня немає доставки на Троєщину.\nТимчасовий: починайте з «до 12.10», «цього тижня» або «завтра»."
+          : "Скажіть своїми словами, напр.: /teach безкоштовна доставка від 2500 грн",
+      reply
     );
     return true;
   }
   const db = createSupabaseServerClient();
+
+  if (kind === "teach") {
+    if (!isAnthropicConfigured()) {
+      await notifyAdmin("AI не налаштовано (ANTHROPIC_API_KEY) — не можу розібрати інструкцію. Скористайтеся /rule або /fact.", reply);
+      return true;
+    }
+    try {
+      const res = await teachFromText(db, body, "teach");
+      await notifyAdmin(`${res.ok && res.kind === "setting" ? "⚙️" : res.ok && res.kind === "fact" ? "🧠" : "📌"} ${res.message}`, {
+        ...reply,
+        buttons:
+          res.ok && res.id
+            ? [[{ text: res.kind === "fact" ? "🗑 Видалити факт" : "🗑 Видалити правило", callback_data: `${res.kind === "fact" ? "kd" : "gd"}:${res.id}` }]]
+            : undefined,
+      });
+    } catch (err) {
+      await notifyAdmin(`Не вдалося розібрати інструкцію: ${err instanceof Error ? err.message : String(err)}`, reply);
+    }
+    return true;
+  }
+
+  const { text, expires } = parseValidity(body);
+  if (!text) return true;
+  const until = formatValidity(expires);
   if (kind === "rule") {
-    const id = await addGuideline(db, body, "admin_feedback");
-    await notifyAdmin(`📌 Правило збережено: «${body.slice(0, 300)}»`, {
-      replyTo: msg.message_id,
+    const id = await addGuideline(db, text, "admin_feedback", expires);
+    await notifyAdmin(`📌 Правило збережено: «${text.slice(0, 300)}»${until ? ` (${until})` : ""}`, {
+      ...reply,
       buttons: id ? [[{ text: "🗑 Видалити правило", callback_data: `gd:${id}` }]] : undefined,
     });
   } else {
-    const id = await addKnowledge(db, body, "admin_group");
-    await notifyAdmin(`🧠 Факт збережено: «${body.slice(0, 300)}»`, {
-      replyTo: msg.message_id,
+    const id = await addKnowledge(db, text, "admin_group", expires);
+    await notifyAdmin(`🧠 Факт збережено: «${text.slice(0, 300)}»${until ? ` (${until})` : ""}`, {
+      ...reply,
       buttons: id ? [[{ text: "🗑 Видалити факт", callback_data: `kd:${id}` }]] : undefined,
     });
   }

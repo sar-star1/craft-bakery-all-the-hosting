@@ -4,6 +4,8 @@ import { useState, useTransition } from "react";
 import {
   addAgentFact,
   addAgentRule,
+  saveOrderingRules,
+  teachAgentAction,
   deleteAgentExample,
   deleteAgentFact,
   deleteAgentRule,
@@ -13,6 +15,7 @@ import {
   type SetupActionResult,
 } from "@/app/setup-actions";
 import type { Lang } from "@/lib/i18n";
+import type { OrderingRules } from "@/lib/orderRules";
 import Sidebar from "./Sidebar";
 import LangToggle from "./LangToggle";
 
@@ -24,8 +27,9 @@ export interface SetupStatus {
     | { ok: true; categories: number; items: number; clients: number; capacityRules: number }
     | { ok: false; error: string }
     | null;
-  rules: { id: string; text: string; source: string }[];
-  facts: { id: string; text: string }[];
+  rules: { id: string; text: string; source: string; expires_at: string | null }[];
+  ordering: OrderingRules;
+  facts: { id: string; text: string; expires_at: string | null }[];
   examples: { id: string; client_message: string; reply: string; quality: string }[];
   telegram:
     | { ok: true; username: string; webhookUrl: string | null; pending: number; lastError: string | null }
@@ -97,10 +101,11 @@ function TeachList({
   empty: string;
   placeholder: string;
   items: { id: string; text: string; tag?: string }[];
-  onAdd: (text: string) => Promise<SetupActionResult>;
+  onAdd: (text: string, expiresAt: string | null) => Promise<SetupActionResult>;
   onDelete: (id: string) => Promise<SetupActionResult>;
 }) {
   const [text, setText] = useState("");
+  const [until, setUntil] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const run = (fn: () => Promise<SetupActionResult>, after?: () => void) =>
@@ -141,9 +146,24 @@ function TeachList({
           placeholder={placeholder}
           className="flex-1 min-w-0 border border-stone-200 rounded px-3 py-1.5 text-sm"
         />
+        <input
+          type="date"
+          value={until}
+          onChange={(e) => setUntil(e.target.value)}
+          title="Діє до (необов'язково)"
+          className="border border-stone-200 rounded px-2 py-1.5 text-sm w-[9.5rem]"
+        />
         <button
           disabled={pending || !text.trim()}
-          onClick={() => run(() => onAdd(text), () => setText(""))}
+          onClick={() =>
+            run(
+              () => onAdd(text, until || null),
+              () => {
+                setText("");
+                setUntil("");
+              }
+            )
+          }
           className="text-[13px] bg-stone-900 text-white px-3 py-1.5 rounded hover:bg-stone-800 disabled:opacity-50"
         >
           Додати
@@ -185,6 +205,74 @@ function ExampleList({ examples }: { examples: SetupStatus["examples"] }) {
           ))}
         </ul>
       )}
+    </>
+  );
+}
+
+function TellAgent() {
+  const [text, setText] = useState("");
+  const [msg, setMsg] = useState<SetupActionResult | null>(null);
+  const [pending, startTransition] = useTransition();
+  return (
+    <div className="mb-5 border border-stone-200 rounded p-3 bg-stone-50">
+      <p className="text-sm font-medium mb-1">Просто скажіть агенту</p>
+      <p className="text-[12px] text-stone-500 mb-2">
+        Напишіть своїми словами — система сама зрозуміє, що це: правило, факт (у т.ч. тимчасовий) чи зміна умов замовлення.
+        Напр.: «цього тижня не доставляємо на Троєщину», «з постійними клієнтами спілкуйся коротко і без вітань»,
+        «безкоштовна доставка від 2500 грн».
+      </p>
+      <div className="flex gap-2">
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && text.trim() && !pending && startTransition(async () => { const r = await teachAgentAction(text); setMsg(r); if (r.ok) setText(""); })}
+          placeholder="Що агент має знати чи робити?"
+          className="flex-1 min-w-0 border border-stone-200 rounded px-3 py-1.5 text-sm bg-white"
+        />
+        <button
+          disabled={pending || !text.trim()}
+          onClick={() => startTransition(async () => { const r = await teachAgentAction(text); setMsg(r); if (r.ok) setText(""); })}
+          className="text-[13px] bg-stone-900 text-white px-3 py-1.5 rounded hover:bg-stone-800 disabled:opacity-50"
+        >
+          {pending ? "…" : "Навчити"}
+        </button>
+      </div>
+      {msg && <p className={`text-[12px] mt-1.5 ${msg.ok ? "text-emerald-700" : "text-rose-700"}`}>{msg.message}</p>}
+    </div>
+  );
+}
+
+function OrderingRulesForm({ initial }: { initial: OrderingRules }) {
+  const [v, setV] = useState(initial);
+  const [msg, setMsg] = useState<SetupActionResult | null>(null);
+  const [pending, startTransition] = useTransition();
+  const field = (key: keyof OrderingRules, label: string) => (
+    <label className="block text-[12px] text-stone-500">
+      {label}
+      <input
+        type="number"
+        min={0}
+        value={v[key]}
+        onChange={(e) => setV({ ...v, [key]: Number(e.target.value) })}
+        className="block w-full border border-stone-200 rounded px-3 py-1.5 text-sm text-stone-900 mt-1"
+      />
+    </label>
+  );
+  return (
+    <>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {field("min_order_total", "Мінімальна сума замовлення, ₴")}
+        {field("free_delivery_from", "Безкоштовна доставка від, ₴")}
+        {field("delivery_fee", "Доставка нижче порогу, ₴")}
+      </div>
+      <button
+        disabled={pending}
+        onClick={() => startTransition(async () => setMsg(await saveOrderingRules(v)))}
+        className="mt-3 text-[13px] bg-stone-900 text-white px-3 py-1.5 rounded hover:bg-stone-800 disabled:opacity-50"
+      >
+        Зберегти
+      </button>
+      {msg && <p className={`text-[12px] mt-1.5 ${msg.ok ? "text-emerald-700" : "text-rose-700"}`}>{msg.message}</p>}
     </>
   );
 }
@@ -282,12 +370,19 @@ export default function SetupPanel({ status }: { status: SetupStatus }) {
             <b> Приклади</b> — як ми реально відповідаємо. Все це можна додавати і з адмін-групи (
             <code>/rule …</code>, <code>/fact …</code>, відповідь із зауваженням на чернетку) та в розділі «Тренування».
           </p>
-          <h3 className="font-medium text-sm mb-1">Правила</h3>
+          <TellAgent />
+          <h3 className="font-medium text-sm mb-1">Умови замовлення (діють у чаті й на сайті)</h3>
+          <OrderingRulesForm initial={status.ordering} />
+          <h3 className="font-medium text-sm mt-5 mb-1">Правила</h3>
           <TeachList
             intro="Діють у кожній відповіді агента та в чернетках нагадувань."
             empty="Правил поки немає."
             placeholder="Напр.: Звертайся на «ви». Не пропонуй знижок. Не став запитань у кінці, якщо не треба."
-            items={status.rules.map((r) => ({ id: r.id, text: r.text, tag: r.source === "admin_feedback" ? "з групи" : undefined }))}
+            items={status.rules.map((r) => ({
+              id: r.id,
+              text: r.text,
+              tag: [r.source === "admin_feedback" || r.source === "teach" ? "з групи" : "", r.expires_at ? `діє до ${r.expires_at.split("-").reverse().join(".")}` : ""].filter(Boolean).join(" · ") || undefined,
+            }))}
             onAdd={addAgentRule}
             onDelete={deleteAgentRule}
           />
@@ -296,7 +391,11 @@ export default function SetupPanel({ status }: { status: SetupStatus }) {
             intro="Агент бере їх через інструмент і може цитувати (на відміну від цін, строків і доставки, які він бере з меню та правил потужності)."
             empty="Фактів поки немає."
             placeholder="Напр.: Ми не робимо торти за індивідуальним дизайном. Реквізити для оплати — …"
-            items={status.facts}
+            items={status.facts.map((f) => ({
+              id: f.id,
+              text: f.text,
+              tag: f.expires_at ? `діє до ${f.expires_at.split("-").reverse().join(".")}` : undefined,
+            }))}
             onAdd={addAgentFact}
             onDelete={deleteAgentFact}
           />
