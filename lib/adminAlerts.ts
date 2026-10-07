@@ -22,6 +22,7 @@ export interface DraftAlert {
   clientMessage?: string;
   reason?: string;
   note?: string; // appended line, e.g. who revised it
+  attachments?: { name: string }[];
 }
 
 export function buildDraftAlert(draft: DraftAlert): { text: string; buttons: InlineButton[][] } {
@@ -38,6 +39,7 @@ export function buildDraftAlert(draft: DraftAlert): { text: string; buttons: Inl
     `${REPLY_TYPE_LABEL[draft.replyType] ?? "Чернетка"} · ${draft.clientName}${draft.reason ? ` (${draft.reason})` : ""}`,
     draft.clientMessage ? `\nКлієнт: «${draft.clientMessage.slice(0, 600)}»` : "",
     `\nЧернетка:\n«${draft.text.slice(0, 1500)}»`,
+    draft.attachments?.length ? `\n📎 Файли: ${draft.attachments.map((a) => a.name).join(", ")}` : "",
     draft.note ? `\n${draft.note}` : "",
     "\n✏️ Відповідь на це повідомлення: звичайний текст — зауваження агенту (перепише чернетку й, якщо зауваження загальне, запам'ятає правило); текст, що починається з «!», піде клієнту як є.",
   ];
@@ -63,7 +65,7 @@ export async function announceDrafts(db: Db, draftIds: string[], label: string):
   if (draftIds.length === 0) return;
   const { data } = await db
     .from("pending_replies")
-    .select("id, client_id, reply_type, draft_text")
+    .select("id, client_id, reply_type, draft_text, attachments")
     .in("id", draftIds.slice(0, MAX_DRAFT_ALERTS));
   const clientIds = [...new Set((data ?? []).map((d) => d.client_id as string))];
   const { data: clients } = await db.from("clients").select("id, business_name").in("id", clientIds);
@@ -76,6 +78,7 @@ export async function announceDrafts(db: Db, draftIds: string[], label: string):
       clientName: names.get(d.client_id as string) ?? "—",
       replyType: d.reply_type as string,
       text: d.draft_text as string,
+      attachments: (d.attachments as { name: string }[] | null) ?? [],
     });
     await new Promise((r) => setTimeout(r, 400)); // stay under Telegram's group rate limit
   }

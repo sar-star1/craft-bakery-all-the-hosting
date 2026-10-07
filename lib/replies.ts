@@ -2,7 +2,8 @@ import "server-only";
 import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { recordExample } from "@/lib/agent/memory";
-import { sendTelegramMessage } from "@/lib/telegram";
+import { notifyAdmin, sendTelegramFile, sendTelegramMessage } from "@/lib/telegram";
+import type { Attachment } from "@/lib/types";
 
 export type ReplyResult =
   | { ok: true; clientName: string }
@@ -27,7 +28,7 @@ export async function sendPendingReply(id: string, opts?: { text?: string }): Pr
 
   const { data: reply } = await db
     .from("pending_replies")
-    .select("id, draft_text, client_id, conversation_id, status, edited, reply_type")
+    .select("id, draft_text, client_id, conversation_id, status, edited, reply_type, attachments")
     .eq("id", id)
     .maybeSingle();
   if (!reply) return { ok: false, error: "Draft not found." };
@@ -66,6 +67,22 @@ export async function sendPendingReply(id: string, opts?: { text?: string }): Pr
     text,
     telegram_message_id: sent.messageId ?? null,
   });
+
+  // Files that go with the message (campaign offers, price lists…).
+  for (const file of ((reply.attachments as Attachment[] | null) ?? [])) {
+    const sentFile = await sendTelegramFile(client.telegram_chat_id as string, file);
+    if (sentFile.ok) {
+      await db.from("messages").insert({
+        client_id: reply.client_id,
+        conversation_id: reply.conversation_id,
+        direction: "out",
+        text: `📎 ${file.name}`,
+        telegram_message_id: sentFile.messageId ?? null,
+      });
+    } else {
+      await notifyAdmin(`Не вдалося надіслати файл «${file.name}» клієнту ${client.business_name}: ${sentFile.error}`).catch(() => {});
+    }
+  }
 
   // Learn from it: what the team sent (or fixed) becomes a worked example.
   if (reply.reply_type === "order_flow") {

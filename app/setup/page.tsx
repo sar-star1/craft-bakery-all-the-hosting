@@ -1,6 +1,8 @@
 import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { AGENT_MODEL } from "@/lib/agent/anthropic";
 import { telegramApi } from "@/lib/telegram";
+import { getOrderingRules } from "@/lib/orders";
+import { DEFAULT_ORDERING_RULES } from "@/lib/orderRules";
 import SetupPanel, { type SetupStatus } from "@/components/SetupPanel";
 
 export const dynamic = "force-dynamic";
@@ -26,6 +28,7 @@ export default async function SetupPage() {
     supabase: null,
     telegram: null,
     rules: [],
+    ordering: DEFAULT_ORDERING_RULES,
     facts: [],
     examples: [],
   };
@@ -49,12 +52,12 @@ export default async function SetupPage() {
       status.supabase = { ok: true, categories, items, clients, capacityRules };
       const { data: rules } = await db
         .from("agent_guidelines")
-        .select("id, text, source")
+        .select("id, text, source, expires_at")
         .eq("active", true)
         .order("created_at", { ascending: true });
       status.rules = (rules ?? []) as SetupStatus["rules"];
       const [{ data: facts }, { data: examples }] = await Promise.all([
-        db.from("agent_knowledge").select("id, text").order("created_at", { ascending: true }),
+        db.from("agent_knowledge").select("id, text, expires_at").order("created_at", { ascending: true }),
         db
           .from("agent_examples")
           .select("id, client_message, reply, quality")
@@ -62,6 +65,7 @@ export default async function SetupPage() {
           .limit(20),
       ]);
       status.facts = (facts ?? []) as SetupStatus["facts"];
+      status.ordering = await getOrderingRules(db);
       status.examples = (examples ?? []) as SetupStatus["examples"];
     } catch (err) {
       status.supabase = { ok: false, error: err instanceof Error ? err.message : String(err) };

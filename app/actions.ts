@@ -9,6 +9,7 @@ import { markClientOrdered } from "@/lib/orders";
 import { rejectPendingReply as rejectReply, sendPendingReply } from "@/lib/replies";
 import { getBotDeepLink } from "@/lib/telegram";
 import {
+  type Attachment,
   nextStatus,
   prevStatus,
   type DepositStatus,
@@ -366,9 +367,22 @@ export async function startSeasonalOffer(
   if (!offer) return { error: "offerRequired" };
   if (!["all", "active", "dormant"].includes(segment)) return { error: "invalid" };
 
+  // Only files we stored ourselves in the campaign bucket may be attached.
+  let attachments: Attachment[] = [];
+  try {
+    const raw = JSON.parse(String(formData.get("attachments") ?? "[]")) as Attachment[];
+    const prefix = `${process.env.SUPABASE_URL}/storage/v1/object/public/campaign-files/`;
+    attachments = raw
+      .filter((a) => typeof a.url === "string" && a.url.startsWith(prefix) && typeof a.name === "string")
+      .slice(0, 5)
+      .map((a) => ({ url: a.url, name: a.name.slice(0, 120), type: String(a.type).slice(0, 100) }));
+  } catch {
+    attachments = [];
+  }
+
   after(async () => {
     try {
-      await createSeasonalOfferDrafts(offer, segment);
+      await createSeasonalOfferDrafts(offer, segment, attachments);
     } catch (err) {
       console.error("seasonal offer failed", err);
     }

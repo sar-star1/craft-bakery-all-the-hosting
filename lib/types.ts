@@ -146,6 +146,13 @@ export const PENDING_REPLY_TYPES: PendingReplyType[] = [
   "seasonal_offer",
 ];
 
+// A file sent along with a campaign message (stored in the public campaign-files bucket).
+export interface Attachment {
+  url: string;
+  name: string;
+  type: string;
+}
+
 export interface PendingReply {
   id: string;
   client_id: string | null;
@@ -153,6 +160,7 @@ export interface PendingReply {
   draft_text: string;
   reply_type: PendingReplyType;
   status: PendingReplyStatus;
+  attachments?: Attachment[];
   created_at: string;
 }
 

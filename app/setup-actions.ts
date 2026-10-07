@@ -4,6 +4,9 @@ import { revalidatePath } from "next/cache";
 import { AGENT_MODEL, getAnthropic, isAnthropicConfigured } from "@/lib/agent/anthropic";
 import { addGuideline } from "@/lib/agent/guidelines";
 import { addKnowledge } from "@/lib/agent/memory";
+import { teachFromText } from "@/lib/agent/teach";
+import { getOrderingRules } from "@/lib/orders";
+import type { OrderingRules } from "@/lib/orderRules";
 import { requireAdmin } from "@/lib/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { notifyAdmin, telegramApi } from "@/lib/telegram";
@@ -58,9 +61,9 @@ export async function testAnthropic(): Promise<SetupActionResult> {
 }
 
 // Standing rules the agent follows in every reply (see lib/agent/guidelines.ts).
-export async function addAgentRule(text: string): Promise<SetupActionResult> {
+export async function addAgentRule(text: string, expiresAt: string | null = null): Promise<SetupActionResult> {
   await requireAdmin();
-  const id = await addGuideline(createSupabaseServerClient(), text, "manual");
+  const id = await addGuideline(createSupabaseServerClient(), text, "manual", expiresAt || null);
   revalidatePath("/setup");
   return id ? { ok: true, message: "Правило додано." } : { ok: false, message: "Введіть текст правила." };
 }
@@ -73,9 +76,9 @@ export async function deleteAgentRule(id: string): Promise<SetupActionResult> {
 }
 
 // Business facts the agent may quote (served through its get_business_info tool).
-export async function addAgentFact(text: string): Promise<SetupActionResult> {
+export async function addAgentFact(text: string, expiresAt: string | null = null): Promise<SetupActionResult> {
   await requireAdmin();
-  const id = await addKnowledge(createSupabaseServerClient(), text, "manual");
+  const id = await addKnowledge(createSupabaseServerClient(), text, "manual", expiresAt || null);
   revalidatePath("/setup");
   return id ? { ok: true, message: "Факт додано." } : { ok: false, message: "Введіть текст." };
 }
@@ -92,4 +95,33 @@ export async function deleteAgentExample(id: string): Promise<SetupActionResult>
   const { error } = await createSupabaseServerClient().from("agent_examples").delete().eq("id", id);
   revalidatePath("/setup");
   return error ? { ok: false, message: error.message } : { ok: true, message: "Приклад видалено." };
+}
+
+// "Just tell the agent": plain words in, the right kind of memory out.
+export async function teachAgentAction(text: string): Promise<SetupActionResult> {
+  await requireAdmin();
+  if (!isAnthropicConfigured()) return { ok: false, message: "ANTHROPIC_API_KEY не задано." };
+  try {
+    const res = await teachFromText(createSupabaseServerClient(), text, "teach");
+    revalidatePath("/setup");
+    return { ok: res.ok, message: res.message };
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function saveOrderingRules(rules: OrderingRules): Promise<SetupActionResult> {
+  await requireAdmin();
+  const clean = (v: number) => (Number.isFinite(v) && v >= 0 ? Math.round(v) : null);
+  const next = {
+    min_order_total: clean(rules.min_order_total),
+    free_delivery_from: clean(rules.free_delivery_from),
+    delivery_fee: clean(rules.delivery_fee),
+  };
+  if (Object.values(next).some((v) => v === null)) return { ok: false, message: "Введіть невід'ємні числа." };
+  const db = createSupabaseServerClient();
+  await getOrderingRules(db); // validates the table is reachable
+  const { error } = await db.from("site_content").upsert({ key: "ordering_rules", content_json: next }, { onConflict: "key" });
+  revalidatePath("/setup");
+  return error ? { ok: false, message: error.message } : { ok: true, message: "Збережено. Діє і в чаті, і на сайті." };
 }
