@@ -15,7 +15,11 @@ create table clients (
   -- gone quiet. Drives the grouped Clients pipeline view.
   pipeline_stage text not null default 'new_lead'
     check (pipeline_stage in ('new_lead', 'cold', 'warm', 'menu_sent', 'first_order', 'recurring', 'dormant')),
-  blocker_note text,   -- cold: their open questions/concerns; warm: what's holding them back
+  blocker_note text,
+  fop text,                    -- remembered from orders, so repeat clients only confirm
+  delivery_address text,
+  payment_method text check (payment_method in ('cash', 'cashless')),
+  phone text,   -- cold: their open questions/concerns; warm: what's holding them back
   standing_order_notes text,
   last_contact_at timestamptz,
   last_order_at timestamptz,
@@ -144,6 +148,7 @@ create table pending_replies (
     check (reply_type in ('order_flow', 'weekly_reminder', 'remarketing', 'seasonal_offer')),
   status text not null default 'awaiting_approval'
     check (status in ('awaiting_approval', 'approved_sent', 'rejected')),
+  attachments jsonb not null default '[]'::jsonb,  -- files sent with a campaign message
   edited boolean not null default false,   -- rewritten from admin feedback before approval
   admin_message_id bigint,   -- the alert in the admin Telegram group (buttons + reply-to-edit)
   created_at timestamptz default now()
@@ -155,7 +160,8 @@ create table agent_guidelines (
   id uuid primary key default gen_random_uuid(),
   text text not null,
   active boolean not null default true,
-  source text not null default 'manual' check (source in ('manual', 'admin_feedback')),
+  source text not null default 'manual' check (source in ('manual', 'admin_feedback', 'teach', 'history_import')),
+  expires_at date,             -- temporary rules stop applying after this day
   created_at timestamptz default now()
 );
 
@@ -163,7 +169,8 @@ create table agent_guidelines (
 create table agent_knowledge (
   id uuid primary key default gen_random_uuid(),
   text text not null,
-  source text not null default 'manual' check (source in ('manual', 'admin_group')),
+  source text not null default 'manual' check (source in ('manual', 'admin_group', 'teach', 'history_import')),
+  expires_at date,             -- e.g. "no deliveries to X this week"
   created_at timestamptz default now()
 );
 
@@ -231,3 +238,14 @@ alter table agent_examples enable row level security;
 insert into storage.buckets (id, name, public)
 values ('menu-photos', 'menu-photos', true)
 on conflict (id) do nothing;
+
+-- Public bucket for files attached to campaign messages (price lists, photos).
+insert into storage.buckets (id, name, public)
+values ('campaign-files', 'campaign-files', true)
+on conflict (id) do nothing;
+
+-- Ordering numbers the team edits in Settings: smallest order, free-delivery
+-- threshold and the fee below it (all UAH).
+insert into site_content (key, content_json) values
+  ('ordering_rules', '{"min_order_total": 1000, "free_delivery_from": 2000, "delivery_fee": 250}'::jsonb)
+on conflict (key) do nothing;

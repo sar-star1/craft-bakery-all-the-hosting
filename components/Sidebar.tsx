@@ -22,6 +22,7 @@ export default function Sidebar({
   const isMenu = pathname.startsWith("/menu");
   const isSetup = pathname.startsWith("/setup");
   const isTraining = pathname.startsWith("/training");
+  const isImport = pathname.startsWith("/import");
 
   return (
     <aside className="w-56 shrink-0 border-r border-stone-200 bg-white/60 px-5 py-6 hidden md:flex md:flex-col">
@@ -73,6 +74,14 @@ export default function Sidebar({
           }`}
         >
           {lang === "uk" ? "Тренування" : "Training"}
+        </Link>
+        <Link
+          href="/import"
+          className={`block px-3 py-1.5 rounded ${
+            isImport ? "bg-stone-900 text-white" : "text-stone-500 hover:bg-stone-100"
+          }`}
+        >
+          {lang === "uk" ? "Імпорт історії" : "Import history"}
         </Link>
         <Link
           href="/setup"

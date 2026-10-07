@@ -101,6 +101,39 @@ The group is actionable, so day-to-day approvals don't need the dashboard:
 Re-register the webhook after upgrading (`scripts/telegram-setup.mjs webhook …`)
 so Telegram also delivers button presses.
 
+## Teaching the agent
+
+Everything below applies to every reply and campaign draft, from the dashboard
+(**Налаштування → Чого навчаємо агента**) or the admin group:
+
+- **Just say it**: `/teach <plain words>` in the group, or the box in Settings.
+  It decides whether it is a *rule* (how to behave/sound), a *fact* (about the
+  bakery) or an *ordering number* (minimum order, free-delivery threshold,
+  delivery fee) and stores it. `/rule` and `/fact` do the same explicitly.
+- **Temporary**: start with `до 12.10`, `цього тижня`, `завтра` (or use the date
+  picker) and it stops applying by itself — e.g. "this week no deliveries to X".
+- **Examples**: every reply the team sends, edits or writes becomes an example
+  the agent imitates; the **Тренування** page lets you chat with the real agent
+  (nothing is saved or sent) and correct it; **Імпорт історії** reads a Telegram
+  Desktop JSON export in the browser, strips phones/e-mails/links, and distils
+  how the team and clients talk (you approve what is saved).
+
+## Ordering
+
+Chat is the main way to order. The agent collects venue name, ФОП, address and
+payment type (cash / cashless) — repeat clients just confirm the remembered
+details — shows a summary priced by `review_order`, and places the order only
+after the client confirms in a later message. Delivery is free from the
+threshold in Settings and costs the configured fee below it; the agent suggests
+adding items to reach it. The website checkout collects the same details. Every
+group alert states назва, ФОП, адреса and оплата, remembered or not. The menu
+link stays available for photos and browsing.
+
+## Campaign files
+
+The seasonal-offer form accepts up to 5 files (images, PDF, Word/Excel/
+PowerPoint, 4 MB each). They are sent after the text of each approved message.
+
 ## Approval policy (`lib/agent/policy.ts`)
 
 A reply to a client who just wrote in auto-sends only when it is routine:
