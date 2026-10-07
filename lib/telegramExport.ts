@@ -146,3 +146,65 @@ export function samplePairs(pairs: Pair[], max: number): Pair[] {
   const repeat = pick(pairs.filter((p) => p.kind === "repeat"), max - fresh.length);
   return [...fresh, ...repeat];
 }
+
+// ---------------------------------------------------------------------------
+// "Things the masking may have missed". Before anything is sent for analysis the
+// sample is scanned for text that looks like a name, a place or an address that
+// the automatic masking did not catch, so a person can decide what to mask.
+
+export interface Flag {
+  text: string; // exactly as found
+  kind: "name" | "address" | "latin";
+  count: number;
+}
+
+const STREET = /(?:вул\.?|вулиця|просп\.?|проспект|бульвар|бул\.?|пров\.?|провулок|пл\.?|площа|наб\.?|набережна|шосе)\s+[\p{L}'’-]+(?:\s+\d+[\p{L}]?)?/giu;
+const LEGAL = /(?:ФОП|ТОВ|ПП|ПрАТ)\s+(?:[\p{Lu}][\p{L}'’-]+(?:\s+[\p{Lu}]\.?){0,2})/gu;
+const CAPITALISED = /(?<=[\p{Ll}\d,;:)»"“]\s)[\p{Lu}][\p{L}'’-]{2,}/gu; // capital letter after a lowercase word — not a sentence start
+const LATIN = /\b[A-Za-z][A-Za-z'’-]{2,}\b/g;
+const IGNORE = new Set(["ok", "okay", "pdf", "http", "https", "www", "the", "and", "for", "ФОП", "ТОВ"]);
+
+export function flagPossibleSensitive(pairs: Pair[]): Flag[] {
+  const found = new Map<string, Flag>();
+  const note = (text: string, kind: Flag["kind"]) => {
+    const key = `${kind}:${text.toLowerCase()}`;
+    const f = found.get(key);
+    if (f) f.count++;
+    else found.set(key, { text, kind, count: 1 });
+  };
+  for (const p of pairs) {
+    for (const part of [p.client, p.reply]) {
+      const taken: [number, number][] = [];
+      const claim = (m: RegExpMatchArray, kind: Flag["kind"]) => {
+        const start = m.index ?? 0;
+        taken.push([start, start + m[0].length]);
+        note(m[0].trim(), kind);
+      };
+      for (const m of part.matchAll(STREET)) claim(m, "address");
+      for (const m of part.matchAll(LEGAL)) claim(m, "name");
+      const free = (m: RegExpMatchArray) => !taken.some(([a, b]) => (m.index ?? 0) >= a && (m.index ?? 0) < b);
+      for (const m of part.matchAll(CAPITALISED)) if (free(m) && !m[0].startsWith("[") && !/^[A-Za-z]/.test(m[0])) note(m[0], "name"); // Latin words are reported once, below
+      for (const m of part.matchAll(LATIN)) if (free(m) && !IGNORE.has(m[0].toLowerCase())) note(m[0], "latin");
+    }
+  }
+  return [...found.values()].sort((a, b) => b.count - a.count).slice(0, 60);
+}
+
+// Replaces the chosen items everywhere (names also with their Ukrainian endings).
+export function applyMasks(pairs: Pair[], flags: Flag[]): Pair[] {
+  const names = flags.filter((f) => f.kind !== "address");
+  const maskNames = nameMasker(names.map((f) => f.text));
+  const addresses = flags.filter((f) => f.kind === "address").map((f) => f.text);
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const maskAddresses = addresses.length ? new RegExp(addresses.map(esc).join("|"), "giu") : null;
+  const apply = (t: string) => {
+    let out = t;
+    if (maskAddresses) out = out.replace(maskAddresses, "[адреса]");
+    return names.length ? maskNames(out) : out;
+  };
+  return pairs.map((p) => ({ ...p, client: apply(p.client), reply: apply(p.reply) }));
+}
+
+// Same scan for the text the analysis hands back (rules, observations, examples).
+export const looksSpecific = (text: string): boolean =>
+  flagPossibleSensitive([{ client: text, reply: "", kind: "new" }]).length > 0 || /\d{3,}/.test(text);

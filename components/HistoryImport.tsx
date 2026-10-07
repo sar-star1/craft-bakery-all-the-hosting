@@ -1,8 +1,18 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { analyzeHistory, saveHistoryLearning, type HistoryAnalysis } from "@/app/import-actions";
-import { buildPairs, detectSenders, parseExport, samplePairs, type ExportChat, type Pair, type Sender } from "@/lib/telegramExport";
+import {
+  applyMasks,
+  buildPairs,
+  detectSenders,
+  flagPossibleSensitive,
+  looksSpecific,
+  parseExport,
+  samplePairs,
+  type ExportChat,
+  type Sender,
+} from "@/lib/telegramExport";
 import type { Lang } from "@/lib/i18n";
 import Sidebar from "./Sidebar";
 import LangToggle from "./LangToggle";
@@ -22,8 +32,17 @@ export default function HistoryImport() {
   const [done, setDone] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  const pairs: Pair[] = chats && ourId ? buildPairs(chats, ourId) : [];
-  const sample = samplePairs(pairs, MAX_SAMPLE);
+  // Items the user chose to leave as they are (everything flagged is masked by default).
+  const [leaveAlone, setLeaveAlone] = useState<Set<string>>(new Set());
+
+  const pairs = useMemo(() => (chats && ourId ? buildPairs(chats, ourId) : []), [chats, ourId]);
+  const sample = useMemo(() => samplePairs(pairs, MAX_SAMPLE), [pairs]);
+  const flags = useMemo(() => flagPossibleSensitive(sample), [sample]);
+  const flagKey = (f: { kind: string; text: string }) => `${f.kind}:${f.text}`;
+  const toSend = useMemo(
+    () => applyMasks(sample, flags.filter((f) => !leaveAlone.has(flagKey(f)))),
+    [sample, flags, leaveAlone]
+  );
 
   const onFile = async (file: File | undefined) => {
     if (!file) return;
@@ -49,13 +68,14 @@ export default function HistoryImport() {
   const analyze = () =>
     startTransition(async () => {
       setError(null);
-      const res = await analyzeHistory(sample);
+      const res = await analyzeHistory(toSend);
       if (!res.ok) return setError(res.error);
       setAnalysis(res.analysis);
+      // Anything that still names something specific starts unticked.
       setKeep({
-        rules: res.analysis.rules.map(() => true),
-        patterns: res.analysis.patterns.map(() => true),
-        examples: res.analysis.examples.map(() => true),
+        rules: res.analysis.rules.map((r) => !looksSpecific(r)),
+        patterns: res.analysis.patterns.map((r) => !looksSpecific(r)),
+        examples: res.analysis.examples.map((e) => !looksSpecific(e.client + " " + e.reply)),
       });
     });
 
@@ -132,12 +152,46 @@ export default function HistoryImport() {
                 Знайдено {pairs.length} обмінів «клієнт → ви» ({pairs.filter((p) => p.kind === "new").length} з перших звернень,{" "}
                 {pairs.filter((p) => p.kind === "repeat").length} з наступних). Для аналізу візьмемо {sample.length}.
               </p>
+              {flags.length > 0 ? (
+                <div className="border border-amber-300 bg-amber-50 rounded p-3">
+                  <p className="font-medium text-amber-900">
+                    ⚠️ Автоматичне маскування могло щось пропустити ({flags.length})
+                  </p>
+                  <p className="text-[12px] text-stone-600 mb-2">
+                    Схоже на імена, назви закладів чи адреси. Позначене буде замінено на «[ім&apos;я]» / «[адреса]» перед
+                    відправкою на аналіз. Приберіть позначку, якщо це не особисті дані (наприклад, назва страви).
+                  </p>
+                  <ul className="max-h-48 overflow-y-auto space-y-1">
+                    {flags.map((f) => (
+                      <li key={flagKey(f)} className="flex items-center gap-2 text-[13px]">
+                        <input
+                          type="checkbox"
+                          checked={!leaveAlone.has(flagKey(f))}
+                          onChange={() =>
+                            setLeaveAlone((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(flagKey(f))) next.delete(flagKey(f));
+                              else next.add(flagKey(f));
+                              return next;
+                            })
+                          }
+                        />
+                        <span>
+                          «{f.text}» <span className="text-stone-400">· {f.kind === "address" ? "адреса" : f.kind === "latin" ? "латиницею" : "ім'я/назва"} · ×{f.count}</span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <p className="text-[12px] text-emerald-700">Підозрілих місць не знайдено (імена, адреси, назви).</p>
+              )}
               <button
                 disabled={pending || sample.length < 5}
                 onClick={analyze}
                 className="text-[13px] bg-stone-900 text-white px-3 py-1.5 rounded hover:bg-stone-800 disabled:opacity-50"
               >
-                {pending && !analysis ? "Аналізую…" : "Проаналізувати"}
+                {pending && !analysis ? "Аналізую…" : "Проаналізувати (відправиться вже замасковане)"}
               </button>
             </div>
           )}
@@ -153,7 +207,7 @@ export default function HistoryImport() {
               {analysis.rules.map((r, i) => (
                 <li key={i} className="flex gap-2">
                   <input type="checkbox" checked={keep.rules[i]} onChange={() => toggle("rules", i)} className="mt-1" />
-                  <span>{r}</span>
+                  <span>{r}{looksSpecific(r) && <span className="text-amber-700"> ⚠ містить конкретику</span>}</span>
                 </li>
               ))}
             </ul>
@@ -163,7 +217,7 @@ export default function HistoryImport() {
               {analysis.patterns.map((r, i) => (
                 <li key={i} className="flex gap-2">
                   <input type="checkbox" checked={keep.patterns[i]} onChange={() => toggle("patterns", i)} className="mt-1" />
-                  <span>{r}</span>
+                  <span>{r}{looksSpecific(r) && <span className="text-amber-700"> ⚠ містить конкретику</span>}</span>
                 </li>
               ))}
             </ul>
