@@ -17,6 +17,7 @@ export default function HistoryImport() {
   const [fileName, setFileName] = useState("");
   const [analysis, setAnalysis] = useState<HistoryAnalysis | null>(null);
   const [keep, setKeep] = useState<{ rules: boolean[]; patterns: boolean[]; examples: boolean[] }>({ rules: [], patterns: [], examples: [] });
+  const [includeExamples, setIncludeExamples] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -65,7 +66,7 @@ export default function HistoryImport() {
       const res = await saveHistoryLearning({
         rules: pick(analysis.rules, keep.rules),
         patterns: pick(analysis.patterns, keep.patterns),
-        examples: pick(analysis.examples, keep.examples),
+        examples: includeExamples ? pick(analysis.examples, keep.examples) : [],
       });
       setDone(res.message);
       setAnalysis(null);
@@ -167,7 +168,17 @@ export default function HistoryImport() {
               ))}
             </ul>
 
-            <h3 className="font-medium mb-1">Приклади ваших відповідей</h3>
+            <label className="flex items-start gap-2 mb-2">
+              <input type="checkbox" checked={includeExamples} onChange={(e) => setIncludeExamples(e.target.checked)} className="mt-1" />
+              <span>
+                <b>Зберегти також дослівні приклади відповідей</b>
+                <span className="block text-[12px] text-stone-500">
+                  Це уривки справжніх діалогів (без телефонів, email, посилань та імен). Агент бачитиме їх як зразки тону.
+                  За замовчуванням вимкнено — тоді зберігаються лише загальні правила й спостереження.
+                </span>
+              </span>
+            </label>
+            {includeExamples && (
             <ul className="space-y-2 mb-4">
               {analysis.examples.map((e, i) => (
                 <li key={i} className="flex gap-2">
@@ -180,6 +191,7 @@ export default function HistoryImport() {
                 </li>
               ))}
             </ul>
+            )}
 
             <button
               disabled={pending}

@@ -91,9 +91,23 @@ export function redact(text: string): string {
     .trim();
 }
 
+// Masks the client's and the chat's name (and Ukrainian endings of it: Олена /
+// Олено / Олени) so conversations stay anonymous.
+export function nameMasker(names: string[]): (text: string) => string {
+  const stems = [...new Set(names.flatMap((n) => n.split(/[\s,.\-_|()«»"']+/)).filter((w) => [...w].length >= 3))].map((w) => {
+    const chars = [...w];
+    const stem = chars.slice(0, Math.max(3, chars.length - 2)).join("").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return stem;
+  });
+  if (stems.length === 0) return (t) => t;
+  const re = new RegExp(`(?<![\\p{L}])(?:${stems.join("|")})\\p{L}*`, "giu");
+  return (t) => t.replace(re, "[ім'я]");
+}
+
 export function buildPairs(chats: ExportChat[], ourId: string): Pair[] {
   const pairs: Pair[] = [];
   for (const chat of chats) {
+    const mask = nameMasker([chat.name, ...chat.messages.filter((m) => m.fromId !== ourId).map((m) => m.from)]);
     // Merge consecutive messages from the same side into one turn.
     const turns: { ours: boolean; text: string; start: number; end: number }[] = [];
     for (const m of chat.messages) {
@@ -109,8 +123,8 @@ export function buildPairs(chats: ExportChat[], ourId: string): Pair[] {
       const a = turns[i];
       const b = turns[i + 1];
       if (!a.ours && b.ours && b.start - a.end <= GAP_REPLY) {
-        const client = redact(a.text);
-        const reply = redact(b.text);
+        const client = mask(redact(a.text));
+        const reply = mask(redact(b.text));
         if (client.length >= 2 && reply.length >= 2) pairs.push({ client, reply, kind: exchange < 2 ? "new" : "repeat" });
         exchange++;
       }
