@@ -9,6 +9,7 @@ export type OrderStatus =
 export type DepositStatus = "paid" | "pending" | "n/a";
 
 export interface OrderLine {
+  item_id?: string;
   name: string;
   category: string;
   qty: number;
@@ -26,6 +27,13 @@ export interface OrderDetails {
   phone?: string;
   // Whether the order form carried a personal-link token (diagnostic only).
   ref_received?: boolean;
+  // Who the order is for / how it is paid (collected in chat or at checkout).
+  venue_name?: string;
+  fop?: string;
+  payment_method?: "cash" | "cashless";
+  delivery_fee?: number;
+  goods_total?: number;
+  requested_date?: string;
 }
 
 export interface Order {
@@ -101,6 +109,11 @@ export interface Client {
   last_contact_at: string | null;
   last_order_at: string | null;
   source: ClientSource | null;
+  // Remembered from earlier orders, so repeat clients only confirm them.
+  fop: string | null;
+  delivery_address: string | null;
+  payment_method: "cash" | "cashless" | null;
+  phone: string | null;
   created_at: string;
 }
 

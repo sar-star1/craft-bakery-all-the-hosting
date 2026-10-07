@@ -74,6 +74,26 @@ export default function DetailPanel({
               <p className="text-stone-700 break-all">{details.email}</p>
             </div>
           )}
+          {details?.fop && (
+            <div>
+              <p className="text-stone-400 text-[11px] uppercase tracking-wide mb-1">{t.orderFop}</p>
+              <p className="text-stone-700">{details.fop}</p>
+            </div>
+          )}
+          {details?.payment_method && (
+            <div>
+              <p className="text-stone-400 text-[11px] uppercase tracking-wide mb-1">{t.orderPayment}</p>
+              <p className="text-stone-700">
+                {details.payment_method === "cash" ? t.payCash : t.payCashless}
+                {typeof details.delivery_fee === "number" && (
+                  <span className="text-stone-400">
+                    {" · "}
+                    {details.delivery_fee === 0 ? t.deliveryFree : `${t.orderDelivery}: ${formatMoney(details.delivery_fee)}`}
+                  </span>
+                )}
+              </p>
+            </div>
+          )}
           {details?.address && (
             <div>
               <p className="text-stone-400 text-[11px] uppercase tracking-wide mb-1">{t.orderAddress}</p>

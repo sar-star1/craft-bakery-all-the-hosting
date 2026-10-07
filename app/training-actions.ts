@@ -9,6 +9,7 @@ import { reviseDraft } from "@/lib/agent/revise";
 import { runAgentLoop } from "@/lib/agent/run";
 import type { TurnFlags } from "@/lib/agent/policy";
 import { requireAdmin } from "@/lib/auth";
+import { PAYMENT_LABEL } from "@/lib/orderRules";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 
@@ -32,18 +33,29 @@ export async function practiceReply(
     const flags: TurnFlags = { humanReviewReasons: [], massOrderFlagged: false, confirmationProposed: false, menuLinkSent: false };
     const client = { id: PRACTICE_CLIENT_ID, business_name: "Тестовий клієнт (тренування)", pipeline_stage: "new_lead" as const };
     const [guidelines, examples] = await Promise.all([getActiveGuidelines(db), getExamples(db)]);
+    // "Simulate a returning client": they've ordered before and we remember their details.
+    const repeat = state.practice_repeat === true;
+    const profile = repeat
+      ? { venue_name: "Кав'ярня «Лагідна»", fop: "ФОП Коваленко І. П.", delivery_address: "Київ, вул. Хрещатик 10", payment_method: "cashless" as const, phone: "+380501112233" }
+      : undefined;
+    const { practice_repeat: _flag, ...memory } = state;
+    void _flag;
     const system = buildSystemPrompt({
-      client: { ...client, contact_name: null, standing_order_notes: null, blocker_note: null },
-      capturedFields: state,
+      client: { ...client, pipeline_stage: repeat ? ("recurring" as never) : client.pipeline_stage, contact_name: null, standing_order_notes: null, blocker_note: null },
+      capturedFields: memory,
       guidelines,
       examples,
+      ordersCount: repeat ? 3 : 0,
+      profile: profile
+        ? { venue_name: profile.venue_name, fop: profile.fop, address: profile.delivery_address, payment: PAYMENT_LABEL[profile.payment_method] }
+        : undefined,
     });
     const messages = history.map((t) => ({
       role: t.role === "client" ? ("user" as const) : ("assistant" as const),
       content: t.text,
     }));
     while (messages.length > 0 && messages[0].role !== "user") messages.shift();
-    const practiceState = { ...state };
+    const practiceState: Record<string, unknown> = { ...state, ...(profile ? { profile } : {}) };
     const text = await runAgentLoop(system, messages, {
       supabase: db,
       client,
@@ -59,7 +71,9 @@ export async function practiceReply(
       ...(flags.massOrderFlagged ? ["Позначив би як масове замовлення"] : []),
       ...(flags.confirmationProposed ? ["Запропонував домовленість — чекала б на підтвердження"] : []),
     ];
-    return { ok: true, text, notes, state: practiceState };
+    const { profile: _p, ...nextState } = practiceState;
+    void _p;
+    return { ok: true, text, notes, state: nextState };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }

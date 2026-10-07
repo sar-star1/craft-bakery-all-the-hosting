@@ -7,6 +7,7 @@ import { notifyAdmin, sendTelegramMessage, sendTypingAction, startPayloadToClien
 import type { ClientSource, PipelineStage } from "@/lib/types";
 import { AGENT_MODEL, getAnthropic, isAnthropicConfigured } from "./anthropic";
 import { getActiveGuidelines } from "./guidelines";
+import { PAYMENT_LABEL } from "@/lib/orderRules";
 import { getExamples } from "./memory";
 import { decideOrderFlowReply, type TurnFlags } from "./policy";
 import { buildSystemPrompt } from "./prompt";
@@ -40,10 +41,13 @@ interface ClientRow {
   pipeline_stage: PipelineStage;
   standing_order_notes: string | null;
   blocker_note: string | null;
+  fop: string | null;
+  delivery_address: string | null;
+  payment_method: "cash" | "cashless" | null;
 }
 
 const CLIENT_COLUMNS =
-  "id, business_name, contact_name, telegram_chat_id, status, pipeline_stage, standing_order_notes, blocker_note";
+  "id, business_name, contact_name, telegram_chat_id, status, pipeline_stage, standing_order_notes, blocker_note, fop, delivery_address, payment_method";
 const MAX_TOOL_ITERATIONS = 8;
 const HISTORY_LIMIT = 30;
 
@@ -324,8 +328,24 @@ async function runAgent(
     .map((m) => ({ role: m.direction === "in" ? ("user" as const) : ("assistant" as const), content: m.text as string }));
   while (messages.length > 0 && messages[0].role !== "user") messages.shift();
 
-  const [guidelines, examples] = await Promise.all([getActiveGuidelines(db), getExamples(db)]);
-  const system = buildSystemPrompt({ client, capturedFields, guidelines, examples });
+  const [guidelines, examples, { count: ordersCount }] = await Promise.all([
+    getActiveGuidelines(db),
+    getExamples(db),
+    db.from("orders").select("id", { count: "exact", head: true }).eq("client_id", client.id),
+  ]);
+  const system = buildSystemPrompt({
+    client,
+    capturedFields,
+    guidelines,
+    examples,
+    ordersCount: ordersCount ?? 0,
+    profile: {
+      venue_name: client.business_name,
+      fop: client.fop ?? undefined,
+      address: client.delivery_address ?? undefined,
+      payment: client.payment_method ? PAYMENT_LABEL[client.payment_method] : undefined,
+    },
+  });
   return runAgentLoop(system, messages, ctx);
 }
 

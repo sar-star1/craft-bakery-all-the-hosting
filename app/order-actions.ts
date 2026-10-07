@@ -4,14 +4,15 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { refTokenToClientId } from "@/lib/clientToken";
 import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase/server";
-import { announceNewOrder, markClientOrdered, priceOrderLines } from "@/lib/orders";
-
+import { announceNewOrder, markClientOrdered, priceOrderLines, saveClientProfile } from "@/lib/orders";
 
 const orderSchema = z.object({
   ref: z.string().max(64).optional(),
-  customer_name: z.string().trim().min(1).max(120),
+  customer_name: z.string().trim().min(1).max(120), // назва кав'ярні
+  fop: z.string().trim().min(2).max(200),
+  payment_method: z.enum(["cash", "cashless"]),
   phone: z.string().trim().min(5).max(40).regex(/^[+\d\s()-]+$/),
-  email: z.string().trim().email().max(255),
+  email: z.string().trim().email().max(255).optional().or(z.literal("")),
   address: z.string().trim().min(3).max(500),
   notes: z.string().trim().max(1000).optional(),
   lines: z
@@ -35,7 +36,7 @@ export async function submitWebsiteOrder(input: SubmitOrderInput): Promise<Submi
 
   const priced = await priceOrderLines(supabase, data.lines.map((l) => ({ item_id: l.item_id, qty: l.qty })));
   if (!priced.ok) return { ok: false, error: priced.error, issues: priced.issues };
-  const { lines, total } = priced;
+  const { lines, total, delivery_fee, grand_total } = priced;
 
   let clientId: string | null = null;
   const refClientId = refTokenToClientId(data.ref);
@@ -66,14 +67,19 @@ export async function submitWebsiteOrder(input: SubmitOrderInput): Promise<Submi
     item_details_uk: {
       notes: data.notes || undefined,
       items: lines,
+      venue_name: data.customer_name,
+      fop: data.fop,
+      payment_method: data.payment_method,
       address: data.address,
-      email: data.email,
+      email: data.email || undefined,
       phone: data.phone,
+      delivery_fee,
+      goods_total: total,
       ref_received: Boolean(data.ref),
     },
     status: needsReview ? "pending_review" : "new",
     deposit_status: "n/a",
-    total_amount: total,
+    total_amount: grand_total,
   })
     .select("id")
     .single();
@@ -82,16 +88,29 @@ export async function submitWebsiteOrder(input: SubmitOrderInput): Promise<Submi
   // The order is saved. Everything below is bookkeeping and alerts: if any of it
   // fails, the customer must still see their order as accepted.
   try {
-    if (clientId) await markClientOrdered(supabase, clientId);
+    if (clientId) {
+      // Remember the details so the next order only needs a "still the same?".
+      await saveClientProfile(supabase, clientId, {
+        venue_name: data.customer_name,
+        fop: data.fop,
+        delivery_address: data.address,
+        payment_method: data.payment_method,
+        phone: data.phone,
+      });
+      await markClientOrdered(supabase, clientId);
+    }
 
     await announceNewOrder({
       orderId: inserted.id as string,
       origin: "сайту",
-      customerName: data.customer_name,
-      total,
-      summary,
+      venueName: data.customer_name,
+      fop: data.fop,
       address: data.address,
+      paymentMethod: data.payment_method,
       phone: data.phone,
+      total: grand_total,
+      deliveryFee: delivery_fee,
+      summary,
       needsReview,
     });
 
