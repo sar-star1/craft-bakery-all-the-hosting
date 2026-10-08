@@ -249,3 +249,35 @@ on conflict (id) do nothing;
 insert into site_content (key, content_json) values
   ('ordering_rules', '{"min_order_total": 1000, "free_delivery_from": 2000, "delivery_fee": 250}'::jsonb)
 on conflict (key) do nothing;
+
+-- Public website (peremogabakery.com.ua) text and photos, edited under
+-- "Публічний сайт" in the dashboard. Separate from site_content on purpose:
+-- the AI agent and the /order storefront never read this table. The slot list
+-- itself (keys, labels, defaults) lives in the website repo and is fetched
+-- from <WEBSITE_URL>/content-manifest.json.
+--   draft     = what the editor saved ('' = back to the website's default)
+--   published = what the live website was last built with
+-- The website reads published values through /api/website-content at build
+-- time; "Опублікувати" copies draft → published and triggers a Vercel rebuild.
+create table if not exists website_content (
+  key text primary key,
+  draft text,
+  published text,
+  updated_at timestamptz not null default now(),
+  published_at timestamptz
+);
+alter table website_content enable row level security;
+
+create table if not exists website_publishes (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  changed_keys text[] not null default '{}',
+  deploy_triggered boolean not null default false,
+  deploy_error text
+);
+alter table website_publishes enable row level security;
+
+-- Photos uploaded for the public website (resized to WebP on upload).
+insert into storage.buckets (id, name, public)
+values ('website-images', 'website-images', true)
+on conflict (id) do nothing;

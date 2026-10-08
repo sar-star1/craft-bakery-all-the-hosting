@@ -18,6 +18,8 @@ const ENV_VARS: { name: string; secret: boolean; needed: string }[] = [
   { name: "SITE_URL", secret: false, needed: "посилання та вебхук" },
   { name: "CRON_SECRET", secret: true, needed: "щоденні/щотижневі завдання" },
   { name: "DASHBOARD_PASSWORD", secret: true, needed: "вхід у дашборд" },
+  { name: "WEBSITE_URL", secret: false, needed: "редактор публічного сайту" },
+  { name: "WEBSITE_DEPLOY_HOOK_URL", secret: true, needed: "публікація змін на сайті" },
 ];
 
 export default async function SetupPage() {

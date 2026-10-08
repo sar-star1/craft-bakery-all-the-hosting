@@ -3,7 +3,8 @@ import { SESSION_COOKIE, safeEqual, sessionToken } from "@/lib/authToken";
 
 // Password gate for the dashboard. Public on purpose: the /order storefront
 // (clients place orders there), the Telegram webhook and the cron routes (both
-// authenticate themselves with their own secrets), and the login page.
+// authenticate themselves with their own secrets), the login page, and the
+// read-only published website text the public site builds from.
 export async function middleware(request: NextRequest) {
   const password = process.env.DASHBOARD_PASSWORD;
   const hasRealData = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
@@ -28,6 +29,6 @@ function redirectToLogin(request: NextRequest, error?: string) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon\\.ico|login|order(?:/|$)|api/telegram/webhook|api/cron/|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|css|js|woff2?)$).*)",
+    "/((?!_next/static|_next/image|favicon\\.ico|login|order(?:/|$)|api/telegram/webhook|api/cron/|api/website-content$|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|css|js|woff2?)$).*)",
   ],
 };

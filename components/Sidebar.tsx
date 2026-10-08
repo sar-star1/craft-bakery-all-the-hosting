@@ -23,6 +23,7 @@ export default function Sidebar({
   const isSetup = pathname.startsWith("/setup");
   const isTraining = pathname.startsWith("/training");
   const isImport = pathname.startsWith("/import");
+  const isWebsite = pathname.startsWith("/website");
 
   return (
     <aside className="w-56 shrink-0 border-r border-stone-200 bg-white/60 px-5 py-6 hidden md:flex md:flex-col">
@@ -90,6 +91,17 @@ export default function Sidebar({
           }`}
         >
           {t.navSettings}
+        </Link>
+      </nav>
+      {/* The public website is its own thing — kept apart from the agent tools above. */}
+      <nav className="text-[14px] mt-4 pt-4 border-t border-stone-200">
+        <Link
+          href="/website"
+          className={`block px-3 py-1.5 rounded ${
+            isWebsite ? "bg-stone-900 text-white" : "text-stone-500 hover:bg-stone-100"
+          }`}
+        >
+          {lang === "uk" ? "Публічний сайт" : "Public website"}
         </Link>
       </nav>
       <form action={logout} className="mt-auto pt-6">
