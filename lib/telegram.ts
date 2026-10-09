@@ -63,6 +63,26 @@ export function editTelegramMessage(chatId: string, messageId: number, text: str
   });
 }
 
+// Reactions a bot may use (a safe subset of Telegram's free emoji set).
+export const ALLOWED_REACTIONS = ["👍", "❤", "🙏", "🔥", "👌"] as const;
+
+// Puts an emoji reaction on a message (best effort — a failed reaction must
+// never block the reply it accompanies).
+export async function setMessageReaction(chatId: string, messageId: number, emoji: string): Promise<boolean> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token || !(ALLOWED_REACTIONS as readonly string[]).includes(emoji)) return false;
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/setMessageReaction`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, message_id: messageId, reaction: [{ type: "emoji", emoji }] }),
+    });
+    return Boolean((await res.json()).ok);
+  } catch {
+    return false;
+  }
+}
+
 // Sends a stored file to a chat: photos as photos, everything else as documents.
 export async function sendTelegramFile(
   chatId: string,

@@ -3,7 +3,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { announceDraft } from "@/lib/adminAlerts";
 import { handleAdminUpdate } from "@/lib/adminBot";
-import { notifyAdmin, sendTelegramMessage, sendTypingAction, startPayloadToClientId } from "@/lib/telegram";
+import { notifyAdmin, sendTelegramMessage, sendTypingAction, setMessageReaction, startPayloadToClientId } from "@/lib/telegram";
 import type { ClientSource, PipelineStage } from "@/lib/types";
 import { AGENT_MODEL, getAnthropic, isAnthropicConfigured } from "./anthropic";
 import { getActiveGuidelines } from "./guidelines";
@@ -285,6 +285,8 @@ async function handleMessage(msg: TelegramMessage, text: string) {
         conversation_id: conversation.id,
         draft_text: reply,
         reply_type: "order_flow",
+        reaction: flags.reaction ?? null,
+        reaction_message_id: flags.reaction ? msg.message_id : null,
       })
       .select("id")
       .single();
@@ -302,6 +304,7 @@ async function handleMessage(msg: TelegramMessage, text: string) {
     return;
   }
 
+  if (flags.reaction) await setMessageReaction(chatId, msg.message_id, flags.reaction);
   const sent = await sendTelegramMessage(chatId, reply);
   if (sent.ok) {
     await logOutgoing(db, clientRow.id, conversation.id, reply, sent.messageId);

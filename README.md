@@ -118,6 +118,10 @@ Everything below applies to every reply and campaign draft, from the dashboard
   Desktop JSON export in the browser, strips phones/e-mails/links, and distils
   how the team and clients talk (you approve what is saved).
 
+**Reactions**: the agent can put a 👍/🙏/❤/🔥/👌 on the client's message together with
+its reply (`react_to_message`; instantly for auto-sent replies, on ✅ for held
+drafts). When it does so is a team rule — edit it in Settings.
+
 ## Ordering
 
 Chat is the main way to order. The agent collects venue name, ФОП, address and

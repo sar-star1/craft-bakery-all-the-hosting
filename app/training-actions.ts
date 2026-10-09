@@ -68,6 +68,7 @@ export async function practiceReply(
     if (!text) return { ok: false, error: flags.humanReviewReasons.join("; ") || "Агент не дав відповіді." };
     const notes = [
       ...flags.humanReviewReasons.map((r) => `Передав би людині: ${r}`),
+      ...(flags.reaction ? [`Поставив би реакцію ${flags.reaction} на повідомлення клієнта`] : []),
       ...(flags.massOrderFlagged ? ["Позначив би як масове замовлення"] : []),
       ...(flags.confirmationProposed ? ["Запропонував домовленість — чекала б на підтвердження"] : []),
     ];

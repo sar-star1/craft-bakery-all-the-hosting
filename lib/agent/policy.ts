@@ -5,6 +5,8 @@ export interface TurnFlags {
   massOrderFlagged: boolean;
   confirmationProposed: boolean;
   menuLinkSent: boolean;
+  // An emoji reaction to put on the client's message together with the reply.
+  reaction?: string;
 }
 
 export type ReplyDecision = { mode: "send" } | { mode: "gate"; reason: string };

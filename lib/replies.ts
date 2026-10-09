@@ -2,7 +2,7 @@ import "server-only";
 import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { recordExample } from "@/lib/agent/memory";
-import { notifyAdmin, sendTelegramFile, sendTelegramMessage } from "@/lib/telegram";
+import { notifyAdmin, sendTelegramFile, sendTelegramMessage, setMessageReaction } from "@/lib/telegram";
 import type { Attachment } from "@/lib/types";
 
 export type ReplyResult =
@@ -28,7 +28,7 @@ export async function sendPendingReply(id: string, opts?: { text?: string }): Pr
 
   const { data: reply } = await db
     .from("pending_replies")
-    .select("id, draft_text, client_id, conversation_id, status, edited, reply_type, attachments")
+    .select("id, draft_text, client_id, conversation_id, status, edited, reply_type, attachments, reaction, reaction_message_id")
     .eq("id", id)
     .maybeSingle();
   if (!reply) return { ok: false, error: "Draft not found." };
@@ -51,6 +51,10 @@ export async function sendPendingReply(id: string, opts?: { text?: string }): Pr
     .select("id");
   if (!claimed?.length) return { ok: false, error: "Already handled.", alreadyHandled: true };
 
+  // A reaction the agent chose goes out together with the reply it belongs to.
+  if (reply.reaction && reply.reaction_message_id) {
+    await setMessageReaction(client.telegram_chat_id as string, Number(reply.reaction_message_id), String(reply.reaction));
+  }
   const sent = await sendTelegramMessage(client.telegram_chat_id as string, text);
   if (!sent.ok) {
     await db

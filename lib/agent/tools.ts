@@ -2,7 +2,7 @@ import "server-only";
 import type Anthropic from "@anthropic-ai/sdk";
 import { getStorefrontLink } from "@/lib/clientToken";
 import type { createSupabaseServerClient } from "@/lib/supabase/server";
-import { notifyAdmin } from "@/lib/telegram";
+import { ALLOWED_REACTIONS, notifyAdmin } from "@/lib/telegram";
 import { getKnowledge } from "./memory";
 import { ORDER_TOOLS, isOrderTool, runOrderTool } from "./orderTools";
 import type { PipelineStage } from "@/lib/types";
@@ -115,6 +115,16 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
       type: "object",
       properties: { matched_text: { type: "string", description: "The client's words that triggered this" } },
       required: ["matched_text"],
+    },
+  },
+  {
+    name: "react_to_message",
+    description:
+      "Put an emoji reaction on the client's message you are answering, sent together with your reply (not instead of it). Use it only where the team's rules say it fits — e.g. 👍 when the client confirms an order or agrees, 🙏 for thanks. Never on complaints, worries or questions; don't react to every message.",
+    input_schema: {
+      type: "object",
+      properties: { emoji: { type: "string", enum: [...ALLOWED_REACTIONS] } },
+      required: ["emoji"],
     },
   },
   {
@@ -277,6 +287,15 @@ export async function runTool(name: string, input: unknown, ctx: ToolContext): P
         `Масове замовлення: ${client.business_name}\n«${String(args.matched_text ?? "")}»${base ? `\n${base}/clients/${client.id}` : ""}`
       );
       return "Flagged. The admin has been notified; a human will handle the reply.";
+    }
+
+    case "react_to_message": {
+      const emoji = String(args.emoji ?? "");
+      if (!(ALLOWED_REACTIONS as readonly string[]).includes(emoji)) return `Not allowed. Use one of: ${ALLOWED_REACTIONS.join(" ")}`;
+      flags.reaction = emoji;
+      return ctx.dryRun
+        ? `Practice mode: ${emoji} would be put on the client's message together with your reply.`
+        : `OK — ${emoji} will be put on the client's message together with your reply. Still write your normal reply.`;
     }
 
     case "request_human_review": {
