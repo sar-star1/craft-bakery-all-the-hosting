@@ -8,12 +8,19 @@ export interface OrderingRules {
   free_delivery_from: number;
   /** Delivery fee below that total. */
   delivery_fee: number;
+  /**
+   * Minutes after the order summary is sent with no answer at which the order is
+   * placed anyway (Telegram doesn't tell a bot whether a message was read, so
+   * silence after a delay stands in for "read, no objection"). 0 turns it off.
+   */
+  auto_confirm_minutes: number;
 }
 
 export const DEFAULT_ORDERING_RULES: OrderingRules = {
   min_order_total: 1000,
   free_delivery_from: 2000,
   delivery_fee: 250,
+  auto_confirm_minutes: 30,
 };
 
 // Kept for existing imports.

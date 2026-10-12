@@ -1,3 +1,5 @@
+import { after } from "next/server";
+import { sweepPendingOrders } from "@/lib/chatOrders";
 import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import type { Order } from "@/lib/types";
 import { mockClients } from "@/lib/mockClients";
@@ -25,6 +27,11 @@ export default async function Page() {
   }
 
   const supabase = createSupabaseServerClient();
+  // Summaries nobody answered are placed when the team looks at the board (and on every
+  // incoming message and the daily job): Vercel can't run a timer for us on a free plan.
+  after(async () => {
+    await sweepPendingOrders(createSupabaseServerClient()).catch((err) => console.error("sweep failed", err));
+  });
   const [{ data, error }, { data: clients }] = await Promise.all([
     supabase.from("orders").select("*").order("created_at", { ascending: false }),
     supabase.from("clients").select("id, business_name").order("business_name"),

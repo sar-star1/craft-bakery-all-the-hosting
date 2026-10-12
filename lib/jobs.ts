@@ -17,12 +17,13 @@ interface JobClient {
   standing_order_notes: string | null;
   pipeline_stage: string;
   blocker_note: string | null;
+  lead_temperature: string | null;
   status: string;
   last_contact_at: string | null;
   last_order_at: string | null;
 }
 const JOB_COLUMNS =
-  "id, business_name, contact_name, standing_order_notes, pipeline_stage, blocker_note, status, last_contact_at, last_order_at";
+  "id, business_name, contact_name, standing_order_notes, pipeline_stage, blocker_note, lead_temperature, status, last_contact_at, last_order_at";
 
 async function getRuleNumber(db: Db, ruleType: string, fallback: number): Promise<number> {
   const { data } = await db.from("capacity_rules").select("value").eq("rule_type", ruleType).maybeSingle();
@@ -53,7 +54,7 @@ async function queueDraft(
     businessName: client.business_name,
     contactName: client.contact_name,
     standingOrderNotes: client.standing_order_notes,
-    leadStage: client.pipeline_stage,
+    leadStage: client.lead_temperature ?? client.pipeline_stage,
     blockerNote: client.blocker_note,
     guidelines: await getActiveGuidelines(db),
     recentOrders: await recentOrderSummaries(db, client.id),
@@ -85,16 +86,18 @@ export interface JobResult {
   skipped?: string;
 }
 
-// Clients who've gone quiet after ordering are marked dormant, so the funnel
-// and the re-engagement job reflect reality.
+// A client who talked to us but never ordered and has gone quiet moves to
+// "Не замовили" (dormant), so the funnel shows who to win back. Clients who
+// have ordered stay where they are: their rhythm is handled by the overdue
+// reminders below, not by this.
 export async function updateDormancy(db: Db): Promise<number> {
-  const days = await getRuleNumber(db, "dormant_threshold_days", 45);
+  const days = await getRuleNumber(db, "dormant_threshold_days", 14);
   const cutoff = new Date(Date.now() - days * DAY_MS).toISOString();
   const { data } = await db
     .from("clients")
     .update({ status: "dormant", pipeline_stage: "dormant" })
-    .in("pipeline_stage", ["first_order", "recurring"])
-    .lt("last_order_at", cutoff)
+    .eq("pipeline_stage", "in_conversation")
+    .lt("last_contact_at", cutoff)
     .select("id");
   return data?.length ?? 0;
 }
@@ -149,7 +152,7 @@ export async function runRemarketing(): Promise<JobResult> {
     .from("clients")
     .select(JOB_COLUMNS)
     .not("telegram_chat_id", "is", null)
-    .or(`and(pipeline_stage.in.(cold,warm,menu_sent),last_contact_at.lt.${cutoff}),pipeline_stage.eq.dormant`);
+    .or(`and(pipeline_stage.eq.in_conversation,last_contact_at.lt.${cutoff}),pipeline_stage.eq.dormant`);
 
   const draftIds: string[] = [];
   for (const client of (clients ?? []) as JobClient[]) {

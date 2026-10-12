@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { sweepPendingOrders } from "@/lib/chatOrders";
 import { runWeeklyReminders } from "@/lib/jobs";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export const maxDuration = 300;
 export const dynamic = "force-dynamic";
@@ -10,5 +12,7 @@ export async function GET(request: Request) {
   if (!secret || request.headers.get("authorization") !== `Bearer ${secret}`) {
     return NextResponse.json({ ok: false }, { status: 401 });
   }
-  return NextResponse.json(await runWeeklyReminders());
+  // Order summaries nobody answered are placed here too (see lib/chatOrders.ts).
+  const swept = await sweepPendingOrders(createSupabaseServerClient()).catch(() => 0);
+  return NextResponse.json({ ...(await runWeeklyReminders()), pendingOrdersPlaced: swept });
 }

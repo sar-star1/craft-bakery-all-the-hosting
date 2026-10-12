@@ -56,7 +56,7 @@ export default function ClientDetail({
       await updateClientBlockerNote(client.id, blocker);
     });
   };
-  const isLead = stage === "new_lead" || stage === "cold" || stage === "warm" || stage === "menu_sent";
+  const isLead = stage === "new_lead" || stage === "in_conversation" || stage === "dormant";
 
   return (
     <div className="min-h-screen bg-[#FAF6EF] flex text-stone-900">

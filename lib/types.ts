@@ -76,24 +76,10 @@ export function prevStatus(status: OrderStatus): OrderStatus {
 
 export type ClientStatus = "active" | "engaged" | "dormant";
 export type ClientSource = "instagram" | "website_form" | "manual_migration";
-export type PipelineStage =
-  | "new_lead"
-  | "cold"
-  | "warm"
-  | "menu_sent"
-  | "first_order"
-  | "recurring"
-  | "dormant";
+export type PipelineStage = "new_lead" | "in_conversation" | "dormant" | "first_order" | "recurring";
+export type LeadTemperature = "cold" | "warm";
 
-export const PIPELINE_STAGES: PipelineStage[] = [
-  "new_lead",
-  "cold",
-  "warm",
-  "menu_sent",
-  "first_order",
-  "recurring",
-  "dormant",
-];
+export const PIPELINE_STAGES: PipelineStage[] = ["new_lead", "in_conversation", "dormant", "first_order", "recurring"];
 
 export interface Client {
   id: string;
@@ -106,6 +92,7 @@ export interface Client {
   // What a not-yet-ordering lead is asking about (cold) or what is holding
   // them back (warm). Written by the agent, editable by admins.
   blocker_note: string | null;
+  lead_temperature: LeadTemperature | null; // cold: has questions · warm: something is holding them back
   last_contact_at: string | null;
   last_order_at: string | null;
   source: ClientSource | null;

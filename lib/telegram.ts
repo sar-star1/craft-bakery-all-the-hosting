@@ -68,18 +68,24 @@ export const ALLOWED_REACTIONS = ["👍", "❤", "🙏", "🔥", "👌"] as cons
 
 // Puts an emoji reaction on a message (best effort — a failed reaction must
 // never block the reply it accompanies).
-export async function setMessageReaction(chatId: string, messageId: number, emoji: string): Promise<boolean> {
+export async function setMessageReaction(
+  chatId: string,
+  messageId: number,
+  emoji: string
+): Promise<{ ok: boolean; error?: string }> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (!token || !(ALLOWED_REACTIONS as readonly string[]).includes(emoji)) return false;
+  if (!token) return { ok: false, error: "no bot token" };
+  if (!(ALLOWED_REACTIONS as readonly string[]).includes(emoji)) return { ok: false, error: `emoji ${emoji} not allowed` };
   try {
     const res = await fetch(`https://api.telegram.org/bot${token}/setMessageReaction`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chat_id: chatId, message_id: messageId, reaction: [{ type: "emoji", emoji }] }),
     });
-    return Boolean((await res.json()).ok);
-  } catch {
-    return false;
+    const json = await res.json();
+    return json.ok ? { ok: true } : { ok: false, error: json.description ?? "Telegram refused the reaction" };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
 

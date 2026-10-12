@@ -243,21 +243,24 @@ export async function runTool(name: string, input: unknown, ctx: ToolContext): P
         return "The ordering link is unavailable right now. Tell the client you'll send it shortly.";
       }
       flags.menuLinkSent = true;
-      if (client.pipeline_stage === "new_lead") {
-        await supabase.from("clients").update({ pipeline_stage: "menu_sent" }).eq("id", client.id);
-        client.pipeline_stage = "menu_sent";
+      if (client.pipeline_stage === "new_lead" || client.pipeline_stage === "dormant") {
+        await supabase.from("clients").update({ pipeline_stage: "in_conversation" }).eq("id", client.id);
+        client.pipeline_stage = "in_conversation";
       }
       return `Personal ordering link (include exactly as-is): ${link}`;
     }
 
     case "classify_lead": {
-      if (!["new_lead", "cold", "warm", "menu_sent"].includes(client.pipeline_stage)) {
+      if (!["new_lead", "in_conversation", "dormant"].includes(client.pipeline_stage)) {
         return "This client has already ordered; lead classification does not apply.";
       }
       const temperature = args.temperature === "warm" ? "warm" : "cold";
       const blocker = String(args.blocker ?? "").trim().slice(0, 500) || null;
-      await supabase.from("clients").update({ pipeline_stage: temperature, blocker_note: blocker }).eq("id", client.id);
-      client.pipeline_stage = temperature;
+      await supabase
+        .from("clients")
+        .update({ pipeline_stage: "in_conversation", lead_temperature: temperature, blocker_note: blocker })
+        .eq("id", client.id);
+      client.pipeline_stage = "in_conversation";
       return "Saved.";
     }
 

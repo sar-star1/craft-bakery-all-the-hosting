@@ -7,6 +7,11 @@ export interface TurnFlags {
   menuLinkSent: boolean;
   // An emoji reaction to put on the client's message together with the reply.
   reaction?: string;
+  // The reply carries a priced order summary (its Telegram message is what a 👍 approves).
+  summaryShown?: boolean;
+  orderPlaced?: boolean;
+  orderAmended?: boolean;
+  toolsUsed?: string[];
 }
 
 export type ReplyDecision = { mode: "send" } | { mode: "gate"; reason: string };
@@ -35,10 +40,7 @@ export function decideOrderFlowReply(input: {
   if (flags.confirmationProposed) {
     return { mode: "gate", reason: "proposes a commitment" };
   }
-  if (pipelineStage === "new_lead" ||
-    pipelineStage === "cold" ||
-    pipelineStage === "warm" ||
-    pipelineStage === "menu_sent") {
+  if (pipelineStage === "new_lead" || pipelineStage === "in_conversation" || pipelineStage === "dormant") {
     return { mode: "gate", reason: "client hasn't ordered yet" };
   }
   return { mode: "send" };

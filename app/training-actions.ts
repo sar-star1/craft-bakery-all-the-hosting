@@ -41,7 +41,7 @@ export async function practiceReply(
     const { practice_repeat: _flag, ...memory } = state;
     void _flag;
     const system = buildSystemPrompt({
-      client: { ...client, pipeline_stage: repeat ? ("recurring" as never) : client.pipeline_stage, contact_name: null, standing_order_notes: null, blocker_note: null },
+      client: { ...client, pipeline_stage: repeat ? ("recurring" as never) : client.pipeline_stage, contact_name: null, standing_order_notes: null, blocker_note: null, lead_temperature: null },
       capturedFields: memory,
       guidelines,
       examples,

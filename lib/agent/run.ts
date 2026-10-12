@@ -3,12 +3,25 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { announceDraft } from "@/lib/adminAlerts";
 import { handleAdminUpdate } from "@/lib/adminBot";
+import {
+  handleReactionApproval,
+  isStale,
+  isSummarized,
+  loadDraftFor,
+  logAgentEvent,
+  markSummarySent,
+  missingFields,
+  placeChatOrder,
+  saveDraftFor,
+  sweepPendingOrders,
+} from "@/lib/chatOrders";
 import { notifyAdmin, sendTelegramMessage, sendTypingAction, setMessageReaction, startPayloadToClientId } from "@/lib/telegram";
 import type { ClientSource, PipelineStage } from "@/lib/types";
 import { AGENT_MODEL, getAnthropic, isAnthropicConfigured } from "./anthropic";
 import { getActiveGuidelines } from "./guidelines";
 import { PAYMENT_LABEL } from "@/lib/orderRules";
 import { getExamples } from "./memory";
+import { claimsOrderAccepted, fallbackReaction, sanitizeReply } from "./postprocess";
 import { decideOrderFlowReply, type TurnFlags } from "./policy";
 import { buildSystemPrompt } from "./prompt";
 import { AGENT_TOOLS, runTool, type ToolContext } from "./tools";
@@ -23,6 +36,12 @@ export interface TelegramMessage {
 export interface TelegramUpdate {
   update_id: number;
   message?: TelegramMessage;
+  // A client put (or removed) a reaction on a message. Needs "message_reaction" in allowed_updates.
+  message_reaction?: {
+    chat: { id: number; type: string };
+    message_id: number;
+    new_reaction?: { type: string; emoji?: string }[];
+  };
   callback_query?: {
     id: string;
     from?: TelegramMessage["from"];
@@ -41,13 +60,14 @@ interface ClientRow {
   pipeline_stage: PipelineStage;
   standing_order_notes: string | null;
   blocker_note: string | null;
+  lead_temperature: "cold" | "warm" | null;
   fop: string | null;
   delivery_address: string | null;
   payment_method: "cash" | "cashless" | null;
 }
 
 const CLIENT_COLUMNS =
-  "id, business_name, contact_name, telegram_chat_id, status, pipeline_stage, standing_order_notes, blocker_note, fop, delivery_address, payment_method";
+  "id, business_name, contact_name, telegram_chat_id, status, pipeline_stage, standing_order_notes, blocker_note, lead_temperature, fop, delivery_address, payment_method";
 const MAX_TOOL_ITERATIONS = 8;
 const HISTORY_LIMIT = 30;
 
@@ -62,6 +82,23 @@ export async function processTelegramUpdate(update: TelegramUpdate): Promise<voi
     console.error("handleAdminUpdate failed", err);
     return true;
   })) {
+    return;
+  }
+
+  // A reaction on one of our messages: a positive one on an order summary approves the order.
+  const reaction = update.message_reaction;
+  if (reaction && reaction.chat.type === "private") {
+    try {
+      const db = createSupabaseServerClient();
+      await handleReactionApproval(db, {
+        chatId: String(reaction.chat.id),
+        messageId: reaction.message_id,
+        emojis: (reaction.new_reaction ?? []).flatMap((r) => (r.type === "emoji" && r.emoji ? [r.emoji] : [])),
+      });
+      await sweepPendingOrders(db);
+    } catch (err) {
+      console.error("reaction handling failed", err);
+    }
     return;
   }
 
@@ -98,7 +135,12 @@ function displayName(msg: TelegramMessage) {
   return { name, fallback: name || (msg.from?.username ? `@${msg.from.username}` : "Новий клієнт") };
 }
 
-async function createLead(db: Db, msg: TelegramMessage, source: ClientSource | null): Promise<ClientRow> {
+async function createLead(
+  db: Db,
+  msg: TelegramMessage,
+  source: ClientSource | null,
+  stage: "new_lead" | "in_conversation" = "new_lead"
+): Promise<ClientRow> {
   const { name, fallback } = displayName(msg);
   const { data, error } = await db
     .from("clients")
@@ -107,7 +149,7 @@ async function createLead(db: Db, msg: TelegramMessage, source: ClientSource | n
       contact_name: name || null,
       telegram_chat_id: String(msg.chat.id),
       status: "engaged",
-      pipeline_stage: "new_lead",
+      pipeline_stage: stage,
       source,
       last_contact_at: new Date().toISOString(),
     })
@@ -203,10 +245,20 @@ async function handleMessage(msg: TelegramMessage, text: string) {
   const chatId = String(msg.chat.id);
 
   let { data: client } = await db.from("clients").select(CLIENT_COLUMNS).eq("telegram_chat_id", chatId).maybeSingle();
-  if (!client) client = await createLead(db, msg, null);
+  if (!client) client = await createLead(db, msg, null, "in_conversation");
   const clientRow = client as ClientRow;
 
   const conversation = await getOrCreateConversation(db, clientRow.id);
+
+  // Housekeeping before the agent looks at anything: other clients' summaries that were
+  // never answered are placed now, and a leftover draft from an earlier day is dropped
+  // (it would otherwise be mixed into whatever this client asks for next).
+  await sweepPendingOrders(db, { excludeClientId: clientRow.id }).catch((err) => console.error("sweep failed", err));
+  const leftover = (conversation.captured_fields as { draft_order?: Parameters<typeof isStale>[0] }).draft_order;
+  if (leftover && isStale(leftover)) {
+    await saveDraftFor(db, conversation.id, null);
+    delete (conversation.captured_fields as Record<string, unknown>).draft_order;
+  }
 
   const { error: dupError } = await db.from("messages").insert({
     client_id: clientRow.id,
@@ -224,7 +276,12 @@ async function handleMessage(msg: TelegramMessage, text: string) {
     db.from("conversations").update({ last_message_at: now }).eq("id", conversation.id),
     db
       .from("clients")
-      .update({ last_contact_at: now, ...(clientRow.status === "dormant" ? { status: "engaged" } : {}) })
+      .update({
+        last_contact_at: now,
+        ...(clientRow.status === "dormant" ? { status: "engaged" } : {}),
+        // Writing after /start (or after going quiet) means a conversation is under way.
+        ...(clientRow.pipeline_stage === "new_lead" || clientRow.pipeline_stage === "dormant" ? { pipeline_stage: "in_conversation" } : {}),
+      })
       .eq("id", clientRow.id),
   ]);
 
@@ -256,13 +313,43 @@ async function handleMessage(msg: TelegramMessage, text: string) {
     inboundCount: inboundCount ?? 1,
   };
 
-  const reply = await runAgent(db, ctx, clientRow, conversation.captured_fields);
+  const rawReply = await runAgent(db, ctx, clientRow, conversation.captured_fields);
 
-  if (!reply) {
+  if (!rawReply) {
     await notifyAdmin(
       `Агент не підготував відповідь для ${clientRow.business_name} (${flags.humanReviewReasons.join("; ") || "порожня відповідь"}). Останнє повідомлення: «${text.slice(0, 300)}»${dashboardLink(`/clients/${clientRow.id}`)}`
     );
     return;
+  }
+
+  // Fix what the model got wrong before anyone sees it.
+  const clean = sanitizeReply(rawReply);
+  const reply = clean.text || rawReply;
+  if (clean.reaction && !flags.reaction) flags.reaction = clean.reaction;
+  if (!flags.reaction) {
+    const fallback = fallbackReaction(text);
+    if (fallback) flags.reaction = fallback;
+  }
+
+  // "Прийнято ✅" must mean the order really is in the system. If the agent says it but
+  // never placed one, place it now when the client has in fact approved a complete
+  // summary — otherwise hold the reply for a person instead of telling the client a lie.
+  if (claimsOrderAccepted(reply) && !flags.orderPlaced && !flags.orderAmended) {
+    const draft = await loadDraftFor(db, conversation.id);
+    if (draft && isSummarized(draft) && missingFields(draft).length === 0 && ctx.inboundCount > (draft.summary_at_inbound ?? Infinity)) {
+      const placed = await placeChatOrder(db, {
+        client: { id: clientRow.id, business_name: clientRow.business_name },
+        conversationId: conversation.id,
+        draft,
+        approval: "safety",
+      });
+      if (placed.ok || placed.alreadyPlaced) flags.orderPlaced = true;
+      await logAgentEvent(db, clientRow.id, "safety_net", { action: "placed_for_agent", ok: placed.ok, reason: placed.ok ? null : placed.reason });
+    }
+    if (!flags.orderPlaced) {
+      flags.humanReviewReasons.push("агент написав, що замовлення прийнято, але в системі його немає");
+      await logAgentEvent(db, clientRow.id, "safety_net", { action: "held_unbacked_claim" });
+    }
   }
 
   const { count: openFlags } = await db
@@ -287,6 +374,7 @@ async function handleMessage(msg: TelegramMessage, text: string) {
         reply_type: "order_flow",
         reaction: flags.reaction ?? null,
         reaction_message_id: flags.reaction ? msg.message_id : null,
+        shows_summary: Boolean(flags.summaryShown),
       })
       .select("id")
       .single();
@@ -301,16 +389,35 @@ async function handleMessage(msg: TelegramMessage, text: string) {
         reason: decision.reason,
       });
     }
+    await logAgentEvent(db, clientRow.id, "turn", turnDetail(flags, { gated: true, reason: decision.reason }));
     return;
   }
 
-  if (flags.reaction) await setMessageReaction(chatId, msg.message_id, flags.reaction);
+  if (flags.reaction) {
+    const r = await setMessageReaction(chatId, msg.message_id, flags.reaction);
+    await logAgentEvent(db, clientRow.id, "reaction", { emoji: flags.reaction, ok: r.ok, error: r.error ?? null, via: "auto_sent" });
+    if (!r.ok) await notifyAdmin(`Не вдалося поставити реакцію ${flags.reaction} клієнту ${clientRow.business_name}: ${r.error}`);
+  }
   const sent = await sendTelegramMessage(chatId, reply);
+  await logAgentEvent(db, clientRow.id, "turn", turnDetail(flags, { gated: false, sent: sent.ok }));
   if (sent.ok) {
     await logOutgoing(db, clientRow.id, conversation.id, reply, sent.messageId);
+    if (flags.summaryShown && sent.messageId) await markSummarySent(db, conversation.id, sent.messageId);
   } else {
     await notifyAdmin(`Не вдалося надіслати відповідь ${clientRow.business_name}: ${sent.error}`);
   }
+}
+
+function turnDetail(flags: TurnFlags, extra: Record<string, unknown>) {
+  return {
+    tools: flags.toolsUsed ?? [],
+    reaction: flags.reaction ?? null,
+    summary_shown: Boolean(flags.summaryShown),
+    order_placed: Boolean(flags.orderPlaced),
+    order_amended: Boolean(flags.orderAmended),
+    review_reasons: flags.humanReviewReasons,
+    ...extra,
+  };
 }
 
 async function runAgent(
@@ -391,6 +498,7 @@ export async function runAgentLoop(
     const results: Anthropic.ToolResultBlockParam[] = [];
     for (const block of response.content) {
       if (block.type !== "tool_use") continue;
+      (ctx.flags.toolsUsed ??= []).push(block.name);
       try {
         results.push({ type: "tool_result", tool_use_id: block.id, content: await runTool(block.name, block.input, ctx) });
       } catch (err) {

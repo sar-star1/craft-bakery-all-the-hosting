@@ -6,27 +6,15 @@ import type { OrderLine, PipelineStage } from "@/lib/types";
 
 type Db = ReturnType<typeof createSupabaseServerClient>;
 
-const NEXT_STAGE: Partial<Record<PipelineStage, PipelineStage>> = {
-  new_lead: "first_order",
-  cold: "first_order",
-  warm: "first_order",
-  menu_sent: "first_order",
-  first_order: "recurring",
-  dormant: "recurring",
-};
-
-// A client just ordered: stamp the order date, mark them active and move them
-// one step up the funnel (first order → recurring). Used both when an order
+// A client just ordered: stamp the order date, mark them active and set their
+// funnel stage from how many orders they now have (1 → first order, 2+ → recurring). Used both when an order
 // arrives through their personal link and when an admin attaches an order to a
 // client by hand.
 export async function markClientOrdered(db: Db, clientId: string, orderedAt: string = new Date().toISOString()) {
-  const { data: row } = await db.from("clients").select("pipeline_stage").eq("id", clientId).maybeSingle();
-  if (!row) return;
-  const stage = row.pipeline_stage as PipelineStage;
-  await db
-    .from("clients")
-    .update({ last_order_at: orderedAt, status: "active", pipeline_stage: NEXT_STAGE[stage] ?? stage })
-    .eq("id", clientId);
+  const { count } = await db.from("orders").select("id", { count: "exact", head: true }).eq("client_id", clientId);
+  // The order that triggered this is already saved, so one order = first order, two or more = recurring.
+  const stage: PipelineStage = (count ?? 1) >= 2 ? "recurring" : "first_order";
+  await db.from("clients").update({ last_order_at: orderedAt, status: "active", pipeline_stage: stage }).eq("id", clientId);
 }
 
 // ---------------------------------------------------------------------------
@@ -43,6 +31,7 @@ export async function getOrderingRules(db: Db): Promise<OrderingRules> {
     min_order_total: num(raw.min_order_total, DEFAULT_ORDERING_RULES.min_order_total),
     free_delivery_from: num(raw.free_delivery_from, DEFAULT_ORDERING_RULES.free_delivery_from),
     delivery_fee: num(raw.delivery_fee, DEFAULT_ORDERING_RULES.delivery_fee),
+    auto_confirm_minutes: num(raw.auto_confirm_minutes, DEFAULT_ORDERING_RULES.auto_confirm_minutes),
   };
 }
 
@@ -160,13 +149,16 @@ export async function announceNewOrder(input: {
   summary: string;
   needsReview: boolean;
   note?: string;
+  // How the order got into the system ("клієнт підтвердив текстом", "👍 на підсумок"…).
+  approvalNote?: string;
+  amended?: boolean;
 }) {
   if (!isTelegramConfigured()) return;
   const base = process.env.SITE_URL?.replace(/\/$/, "");
   const status = input.needsReview ? "pending_review" : "new";
   await notifyAdmin(
     [
-      `Нове замовлення з ${input.origin} · ${input.total} ₴${input.deliveryFee ? ` (з доставкою ${input.deliveryFee} ₴)` : " (доставка безкоштовна)"}`,
+      `${input.amended ? "✏️ ЗАМОВЛЕННЯ ЗМІНЕНО" : "📦 НОВЕ ЗАМОВЛЕННЯ"} з ${input.origin} · ${input.total} ₴${input.deliveryFee ? ` (з доставкою ${input.deliveryFee} ₴)` : " (доставка безкоштовна)"}`,
       `Назва: ${input.venueName}`,
       `ФОП: ${input.fop ?? "—"}`,
       `Адреса: ${input.address ?? "—"}`,
@@ -175,6 +167,7 @@ export async function announceNewOrder(input: {
       "",
       input.summary.length > 300 ? `${input.summary.slice(0, 297)}...` : input.summary,
       input.note,
+      input.approvalNote ? `Підтвердження: ${input.approvalNote}` : "",
       input.needsReview ? "Потребує перевірки: замовлення не прив'язане до жодного клієнта." : "",
     ]
       .filter((l): l is string => typeof l === "string")

@@ -30,7 +30,7 @@ export async function registerTelegramWebhook(): Promise<SetupActionResult> {
   const res = await telegramApi("setWebhook", {
     url,
     secret_token: secret,
-    allowed_updates: ["message", "callback_query"],
+    allowed_updates: ["message", "callback_query", "message_reaction"],
   });
   revalidatePath("/setup");
   return res.ok ? { ok: true, message: `Вебхук зареєстровано: ${url}` } : { ok: false, message: res.error };

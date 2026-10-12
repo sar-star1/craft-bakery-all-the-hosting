@@ -21,7 +21,7 @@ function ClientCard({ client, lang }: { client: Client; lang: Lang }) {
         {client.business_name}
       </p>
       <p className="text-[13px] text-stone-500 mt-0.5 truncate">{client.contact_name ?? "—"}</p>
-      {client.blocker_note && (client.pipeline_stage === "cold" || client.pipeline_stage === "warm") && (
+      {client.blocker_note && !(client.pipeline_stage === "first_order" || client.pipeline_stage === "recurring") && (
         <p className="text-[12px] text-stone-600 mt-2 leading-snug line-clamp-3 bg-stone-50 rounded px-2 py-1.5">
           {client.blocker_note}
         </p>

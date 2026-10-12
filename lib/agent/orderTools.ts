@@ -1,40 +1,27 @@
 import "server-only";
 import type Anthropic from "@anthropic-ai/sdk";
-import { PAYMENT_LABEL, type PaymentMethod } from "@/lib/orderRules";
 import {
-  announceNewOrder,
-  getClientProfile,
-  markClientOrdered,
-  priceOrderLines,
-  saveClientProfile,
-  type ClientProfile,
-} from "@/lib/orders";
+  isStale,
+  isSummarized,
+  loadDraftFor,
+  logAgentEvent,
+  missingFields,
+  placeChatOrder,
+  saveDraftFor,
+  type Approval,
+  type OrderDraft,
+} from "@/lib/chatOrders";
+import { PAYMENT_LABEL } from "@/lib/orderRules";
+import { announceNewOrder, getClientProfile, priceOrderLines, type ClientProfile } from "@/lib/orders";
 import type { ToolContext } from "./tools";
 
 // Taking an order in chat. The cart lives in the conversation (or, in the
 // dashboard's practice chat, in a state object that round-trips through the
 // browser). The agent never states prices itself: every figure it gives comes
 // from review_order, which prices the cart from the live menu with exactly the
-// same rules as the website — delivery fee included.
-
-interface DraftLine {
-  item_id: string;
-  name: string;
-  qty: number;
-}
-interface OrderDraft {
-  lines: DraftLine[];
-  venue_name?: string; // назва кав'ярні
-  fop?: string;
-  address?: string;
-  payment_method?: PaymentMethod;
-  phone?: string;
-  requested_date?: string;
-  notes?: string;
-  // How many client messages existed when the summary was last shown. An order
-  // can only be placed after a LATER client message (their confirmation).
-  summary_at_inbound?: number;
-}
+// same rules as the website — delivery fee included. Whether an order is
+// really in the system is decided by code (lib/chatOrders.ts), not by what the
+// agent says.
 
 export const ORDER_TOOLS: Anthropic.Tool[] = [
   {
@@ -70,6 +57,11 @@ export const ORDER_TOOLS: Anthropic.Tool[] = [
         notes: { type: "string", description: "Comment for the bakery" },
         use_saved_profile: { type: "boolean", description: "Fill the details from what we remember about this client" },
         repeat_last_order: { type: "boolean", description: "Start the cart from this client's previous order" },
+        edit_pending: {
+          type: "boolean",
+          description:
+            "Set true ONLY when a summary was already shown and the client is now changing THAT order. If they are starting a different order, first place the pending one (place_order, approval 'continued') instead.",
+        },
         clear: { type: "boolean", description: "Discard the whole draft (client changed their mind)" },
       },
     },
@@ -83,11 +75,39 @@ export const ORDER_TOOLS: Anthropic.Tool[] = [
   {
     name: "place_order",
     description:
-      "Place the order. Only after review_order was shown to the client AND the client then explicitly confirmed it in a later message. Fails otherwise.",
+      "Put the order into the order system. Only after review_order was shown to the client AND the client then approved it in a later message: approval 'text' when they confirm in words, 'continued' when they moved on to something else without objecting to the summary. Fails otherwise — and if it fails the order is NOT placed: never tell the client it was accepted.",
     input_schema: {
       type: "object",
-      properties: { client_confirmed: { type: "boolean", description: "true only if the client explicitly confirmed the summary" } },
+      properties: {
+        client_confirmed: { type: "boolean", description: "true only if the client approved the summary (or moved on without objecting)" },
+        approval: { type: "string", enum: ["text", "continued"] },
+      },
       required: ["client_confirmed"],
+    },
+  },
+  {
+    name: "amend_last_order",
+    description:
+      "Change the client's most recent order that is already in the system — ONLY when the client explicitly asks to add to or change that earlier order. Otherwise a new message is a new order. `items` entries: mode 'add' (default) adds the quantity, 'set' sets it exactly (0 removes). Fails if the order is already confirmed by the team; then do not claim it was changed — request_human_review.",
+    input_schema: {
+      type: "object",
+      properties: {
+        items: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              item_id: { type: "string" },
+              qty: { type: "integer", minimum: 0 },
+              mode: { type: "string", enum: ["add", "set"] },
+            },
+            required: ["item_id", "qty"],
+          },
+        },
+        notes: { type: "string" },
+        address: { type: "string" },
+        requested_date: { type: "string", description: "YYYY-MM-DD" },
+      },
     },
   },
 ];
@@ -102,8 +122,14 @@ function json(value: unknown): string {
 async function loadDraft(ctx: ToolContext): Promise<OrderDraft> {
   const empty: OrderDraft = { lines: [] };
   if (ctx.dryRun) return (ctx.practiceState?.draft_order as OrderDraft | undefined) ?? empty;
-  const { data } = await ctx.supabase.from("conversations").select("captured_fields").eq("id", ctx.conversationId).maybeSingle();
-  return ((data?.captured_fields as Record<string, unknown> | null)?.draft_order as OrderDraft | undefined) ?? empty;
+  const draft = await loadDraftFor(ctx.supabase, ctx.conversationId);
+  if (!draft) return empty;
+  // A leftover from a previous day isn't an order in progress.
+  if (isStale(draft)) {
+    await saveDraftFor(ctx.supabase, ctx.conversationId, null);
+    return empty;
+  }
+  return draft;
 }
 
 async function saveDraft(ctx: ToolContext, draft: OrderDraft | null) {
@@ -114,27 +140,12 @@ async function saveDraft(ctx: ToolContext, draft: OrderDraft | null) {
     }
     return;
   }
-  const { data } = await ctx.supabase.from("conversations").select("captured_fields").eq("id", ctx.conversationId).maybeSingle();
-  const fields = { ...((data?.captured_fields as Record<string, unknown> | null) ?? {}) };
-  if (draft) fields.draft_order = draft;
-  else delete fields.draft_order;
-  await ctx.supabase.from("conversations").update({ captured_fields: fields }).eq("id", ctx.conversationId);
+  await saveDraftFor(ctx.supabase, ctx.conversationId, draft);
 }
 
 async function savedProfile(ctx: ToolContext): Promise<ClientProfile & { business_name?: string }> {
   if (ctx.dryRun) return (ctx.practiceState?.profile as ClientProfile | undefined) ?? {};
   return getClientProfile(ctx.supabase, ctx.client.id);
-}
-
-// Phone is optional; everything else the bakery needs to deliver and invoice.
-function missingFields(draft: OrderDraft): string[] {
-  const missing: string[] = [];
-  if (draft.lines.length === 0) missing.push("items");
-  if (!draft.venue_name) missing.push("venue name (назва кав'ярні)");
-  if (!draft.fop) missing.push("ФОП");
-  if (!draft.address) missing.push("delivery address");
-  if (!draft.payment_method) missing.push("payment method (cash / cashless)");
-  return missing;
 }
 
 const trimmed = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) || undefined : undefined);
@@ -176,6 +187,13 @@ export async function runOrderTool(name: string, args: Record<string, unknown>, 
         return "Draft cleared.";
       }
       const draft = await loadDraft(ctx);
+
+      // A summary was already shown and nobody has approved it yet. Adding items now
+      // would silently merge a possibly different order into it — make the agent choose.
+      const touchesItems = Array.isArray(args.items) && args.items.length > 0;
+      if (isSummarized(draft) && touchesItems && args.edit_pending !== true) {
+        return "Not changed: a summary of the current order was already shown to the client and is waiting for their approval. If the client is CHANGING that order, call update_order_draft again with edit_pending: true. If they are starting a different order and did not object to the summary, first call place_order (client_confirmed: true, approval: 'continued'), then start the new order. Never mix two orders.";
+      }
 
       if (args.use_saved_profile === true) {
         const p = await savedProfile(ctx);
@@ -250,7 +268,10 @@ export async function runOrderTool(name: string, args: Record<string, unknown>, 
         const d = args.requested_date.trim();
         draft.requested_date = /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(d)) ? d : undefined;
       }
-      draft.summary_at_inbound = undefined; // anything changed → must be re-shown and re-confirmed
+      // anything changed → the summary must be shown again and approved again
+      draft.summary_at_inbound = undefined;
+      draft.summary_message_id = undefined;
+      draft.summary_sent_at = undefined;
       await saveDraft(ctx, draft);
       return json({
         saved: true,
@@ -270,7 +291,12 @@ export async function runOrderTool(name: string, args: Record<string, unknown>, 
       if (!priced.ok) return json({ lines: draft.lines.map((l) => ({ name: l.name, qty: l.qty })), problems: priced.issues, missing });
 
       draft.summary_at_inbound = ctx.inboundCount;
+      draft.summary_message_id = undefined;
+      draft.summary_sent_at = undefined;
       await saveDraft(ctx, draft);
+      // The reply that carries this summary is remembered once it is actually sent,
+      // so a reaction to it can approve the order.
+      if (missing.length === 0) ctx.flags.summaryShown = true;
       const toFree = priced.delivery_fee > 0 ? priced.rules.free_delivery_from - priced.total : 0;
       return json({
         lines: priced.lines.map((l) => ({ name: l.name, qty: l.qty, unit_price_uah: l.unit_price, subtotal_uah: l.subtotal })),
@@ -297,101 +323,129 @@ export async function runOrderTool(name: string, args: Record<string, unknown>, 
     }
 
     case "place_order": {
-      if (args.client_confirmed !== true) return "Not placed: the client has not confirmed.";
+      const NOT_ACCEPTED = " Do NOT tell the client the order is accepted — it is not in the system.";
+      if (args.client_confirmed !== true) return `Not placed: the client has not approved the summary.${NOT_ACCEPTED}`;
+      const approval: Approval = args.approval === "continued" ? "continued" : "text";
       const draft = await loadDraft(ctx);
       const missing = missingFields(draft);
-      if (missing.length) return `Not placed: still missing ${missing.join(", ")}.`;
-      if (draft.summary_at_inbound === undefined || ctx.inboundCount <= draft.summary_at_inbound) {
-        return "Not placed: first show the client the summary from review_order and wait for their confirmation in their NEXT message.";
+      if (missing.length) return `Not placed: still missing ${missing.join(", ")}. Ask the client for these, then review_order again.${NOT_ACCEPTED}`;
+      if (!isSummarized(draft) || ctx.inboundCount <= (draft.summary_at_inbound ?? Infinity)) {
+        return `Not placed: first show the client the summary from review_order and wait for their approval in a LATER message.${NOT_ACCEPTED}`;
       }
-      const priced = await priceOrderLines(supabase, draft.lines.map((l) => ({ item_id: l.item_id, qty: l.qty })));
-      if (!priced.ok) return `Not placed: ${priced.issues.join("; ")}`;
+
+      if (ctx.dryRun) {
+        const priced = await priceOrderLines(supabase, draft.lines.map((l) => ({ item_id: l.item_id, qty: l.qty })));
+        if (!priced.ok) return `Not placed: ${priced.issues.join("; ")}${NOT_ACCEPTED}`;
+        await saveDraft(ctx, null);
+        const summary = priced.lines.map((l) => `${l.name} ×${l.qty}`).join(", ");
+        return `Practice mode: the order would be in the system now (${summary}; goods ${priced.total} UAH + delivery ${priced.delivery_fee} UAH = ${priced.grand_total} UAH). Nothing was saved. Tell the client it's accepted and a manager will confirm details and date. The client's NEXT message is a new order unless they explicitly ask to change this one.`;
+      }
+
+      const res = await placeChatOrder(supabase, { client, conversationId: ctx.conversationId, draft, approval });
+      if (!res.ok) {
+        if (res.alreadyPlaced) return "This exact order is already in the system (placed a moment ago). You may tell the client it is accepted.";
+        if (/database/.test(res.reason)) ctx.flags.humanReviewReasons.push("could not save the order from chat");
+        return `Not placed: ${res.reason}.${NOT_ACCEPTED}`;
+      }
+      ctx.flags.orderPlaced = true;
+      return `Order placed and visible to the team in the dashboard (${res.summary}; goods ${res.goods} UAH + delivery ${res.deliveryFee} UAH = ${res.grandTotal} UAH). Tell the client it's accepted and that a manager will confirm the details and delivery date. Do not promise a specific time. The client's NEXT message is a NEW order unless they explicitly ask to change this one (then use amend_last_order).`;
+    }
+
+    case "amend_last_order": {
+      const NOT_CHANGED = " Do NOT tell the client the order was changed.";
+      const wanted = (Array.isArray(args.items) ? args.items : []) as { item_id?: string; qty?: number; mode?: string }[];
+      if (ctx.dryRun) {
+        return `Practice mode: the client's previous order would be changed now (${wanted.length} item change(s)). Nothing was saved. Tell the client what you changed.`;
+      }
+
+      // "My last order" means the most recent one, whatever its state — never an older
+      // order that happens to still be open.
+      const { data: last } = await supabase
+        .from("orders")
+        .select("id, status, item_details_uk, due_date")
+        .eq("client_id", client.id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!last || !["new", "pending_review"].includes(String(last.status))) {
+        return `Not changed: the client's latest order ${last ? "is already being handled by the team" : "does not exist"}.${NOT_CHANGED} Call request_human_review so a person handles the change, or — if the client just wants more — start a new order.`;
+      }
+
+      const details = (last.item_details_uk ?? {}) as Record<string, unknown> & {
+        items?: { item_id?: string; name: string; qty: number }[];
+      };
+      const { data: menu } = await supabase.from("menu_items").select("id, name_uk");
+      const idByName = new Map((menu ?? []).map((m) => [String(m.name_uk), m.id as string]));
+      const qty = new Map<string, number>();
+      for (const l of details.items ?? []) {
+        const id = l.item_id ?? idByName.get(l.name);
+        if (id) qty.set(id, (qty.get(id) ?? 0) + l.qty);
+      }
+      for (const w of wanted) {
+        if (typeof w.item_id !== "string") continue;
+        const n = Math.max(0, Math.min(10000, Math.floor(Number(w.qty) || 0)));
+        const current = qty.get(w.item_id) ?? 0;
+        qty.set(w.item_id, w.mode === "set" ? n : current + n);
+      }
+      const lines = [...qty.entries()].filter(([, n]) => n > 0).map(([item_id, n]) => ({ item_id, qty: n }));
+      if (lines.length === 0) return `Not changed: the order would be empty.${NOT_CHANGED}`;
+      const priced = await priceOrderLines(supabase, lines);
+      if (!priced.ok) return `Not changed: ${priced.issues.join("; ")}.${NOT_CHANGED}`;
 
       const summary = priced.lines.map((l) => `${l.name} ×${l.qty}`).join(", ");
-      const summaryShort = summary.length > 240 ? `${summary.slice(0, 237)}...` : summary;
-      if (ctx.dryRun) {
-        await saveDraft(ctx, null);
-        return `Practice mode: the order would be placed now (${summary}; goods ${priced.total} UAH + delivery ${priced.delivery_fee} UAH = ${priced.grand_total} UAH). Nothing was saved. Tell the client it's accepted and a manager will confirm details and date.`;
+      const patch: Record<string, unknown> = {
+        item_summary_uk: summary.length > 240 ? `${summary.slice(0, 237)}...` : summary,
+        total_amount: priced.grand_total,
+      };
+      const newDetails: Record<string, unknown> = {
+        ...details,
+        items: priced.lines,
+        delivery_fee: priced.delivery_fee,
+        goods_total: priced.total,
+        amended_at: new Date().toISOString(),
+      };
+      if (typeof args.notes === "string") newDetails.notes = args.notes.trim().slice(0, 1000);
+      if (typeof args.address === "string" && args.address.trim()) newDetails.address = args.address.trim().slice(0, 500);
+      if (typeof args.requested_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(args.requested_date.trim())) {
+        newDetails.requested_date = args.requested_date.trim();
+        patch.due_date = args.requested_date.trim();
+      }
+      patch.item_details_uk = newDetails;
+      const { error } = await supabase.from("orders").update(patch).eq("id", last.id);
+      if (error) {
+        ctx.flags.humanReviewReasons.push("could not change the order from chat");
+        return `Not changed: a technical error.${NOT_CHANGED}`;
       }
 
-      // Guard against a double-send: same client, same total and items, last 15 minutes.
-      const since = new Date(Date.now() - 15 * 60 * 1000).toISOString();
-      const { data: recent } = await supabase
-        .from("orders")
-        .select("id")
-        .eq("client_id", client.id)
-        .eq("total_amount", priced.grand_total)
-        .eq("item_summary_uk", summaryShort)
-        .gte("created_at", since)
-        .limit(1);
-      if (recent?.length) {
-        await saveDraft(ctx, null);
-        return "This exact order was already placed a moment ago. Tell the client it's already accepted.";
-      }
-
-      const dueDate =
-        draft.requested_date && draft.requested_date >= new Date().toISOString().slice(0, 10) ? draft.requested_date : null;
-      const { data: inserted, error } = await supabase
-        .from("orders")
-        .insert({
-          client_id: client.id,
-          source: "telegram",
-          customer_name: draft.venue_name,
-          customer_contact: draft.phone ?? null,
-          item_summary_uk: summaryShort,
-          item_details_uk: {
-            notes: draft.notes,
-            items: priced.lines,
-            venue_name: draft.venue_name,
-            fop: draft.fop,
-            address: draft.address,
-            payment_method: draft.payment_method,
-            phone: draft.phone,
-            requested_date: draft.requested_date,
-            delivery_fee: priced.delivery_fee,
-            goods_total: priced.total,
-          },
-          status: "new",
-          deposit_status: "n/a",
-          total_amount: priced.grand_total,
-          due_date: dueDate,
-        })
-        .select("id")
-        .single();
-      if (error || !inserted) {
-        ctx.flags.humanReviewReasons.push("could not save the order from chat");
-        return "Not placed: a technical error. Tell the client you'll pass it to the team right away.";
-      }
-
-      await saveDraft(ctx, null);
+      ctx.flags.orderAmended = true;
+      await logAgentEvent(supabase, client.id, "order_amended", { order_id: last.id, total: priced.grand_total });
       try {
-        // Remember the details so the next order only needs a "still the same?".
-        await saveClientProfile(supabase, client.id, {
-          venue_name: draft.venue_name,
-          fop: draft.fop,
-          delivery_address: draft.address,
-          payment_method: draft.payment_method,
-          phone: draft.phone,
-        });
-        await markClientOrdered(supabase, client.id);
         await announceNewOrder({
-          orderId: inserted.id as string,
+          orderId: last.id as string,
           origin: "чату",
-          venueName: draft.venue_name!,
-          fop: draft.fop,
-          address: draft.address,
-          paymentMethod: draft.payment_method,
-          phone: draft.phone,
+          venueName: String(newDetails.venue_name ?? client.business_name),
+          fop: newDetails.fop as string | undefined,
+          address: newDetails.address as string | undefined,
+          paymentMethod: newDetails.payment_method as "cash" | "cashless" | undefined,
+          phone: newDetails.phone as string | undefined,
           total: priced.grand_total,
           deliveryFee: priced.delivery_fee,
           summary,
           needsReview: false,
-          note: draft.requested_date ? `Бажана дата: ${draft.requested_date}` : undefined,
+          amended: true,
+          approvalNote: "клієнт попросив змінити попереднє замовлення",
         });
       } catch (err) {
-        console.error("post-order side effects failed", err);
+        console.error("amend alert failed", err);
       }
-      return `Order placed (${summary}; goods ${priced.total} UAH + delivery ${priced.delivery_fee} UAH = ${priced.grand_total} UAH). Tell the client it's accepted and that a manager will confirm the details and delivery date. Do not promise a specific time.`;
+      return json({
+        changed: true,
+        lines: priced.lines.map((l) => ({ name: l.name, qty: l.qty, subtotal_uah: l.subtotal })),
+        goods_total_uah: priced.total,
+        delivery_fee_uah: priced.delivery_fee,
+        grand_total_uah: priced.grand_total,
+        next: "Tell the client the order was updated, using these numbers. The team has been notified.",
+      });
     }
 
     default:
