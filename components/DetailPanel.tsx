@@ -14,6 +14,7 @@ export default function DetailPanel({
   onBack,
   clients,
   onLink,
+  onDelete,
 }: {
   order: Order | null;
   lang: Lang;
@@ -22,6 +23,7 @@ export default function DetailPanel({
   onBack: (id: string) => void;
   clients: { id: string; business_name: string }[];
   onLink: (orderId: string, clientId: string) => void;
+  onDelete: (id: string) => void;
 }) {
   const [pick, setPick] = useState("");
   if (!order) return null;
@@ -184,6 +186,14 @@ export default function DetailPanel({
             </button>
           )}
         </div>
+        <button
+          onClick={() => {
+            if (window.confirm(lang === "uk" ? "Видалити це замовлення остаточно?" : "Delete this order for good?")) onDelete(order.id);
+          }}
+          className="mt-6 text-[12px] text-stone-400 hover:text-rose-700"
+        >
+          {lang === "uk" ? "Видалити замовлення" : "Delete order"}
+        </button>
       </div>
     </div>
   );

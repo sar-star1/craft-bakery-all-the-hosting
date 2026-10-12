@@ -174,6 +174,7 @@ export async function announceNewOrder(input: {
       .join("\n")
       .replace(/\n{3,}/g, "\n\n"),
     {
+      kind: "order",
       buttons: [
         [{ text: input.needsReview ? "👍 Перевірено" : "✅ Підтвердити", callback_data: `os:${input.orderId}:${status}` }],
         ...(base ? [[{ text: "Відкрити в дашборді", url: `${base}/` }]] : []),

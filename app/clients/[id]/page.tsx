@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase/server";
-import type { Client, Conversation, Message, Order, PendingReply } from "@/lib/types";
+import type { AgentEvent, Client, Conversation, Message, Order, PendingReply } from "@/lib/types";
 import { getStorefrontLink } from "@/lib/clientToken";
 import { mockClients, mockConversations, mockMessages, mockPendingReplies } from "@/lib/mockClients";
 import { mockOrders } from "@/lib/mockOrders";
@@ -35,7 +35,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
 
   const supabase = createSupabaseServerClient();
 
-  const [{ data: client, error: clientError }, { data: conversations }, { data: orders }, { data: messages }] =
+  const [{ data: client, error: clientError }, { data: conversations }, { data: orders }, { data: messages }, { data: events }] =
     await Promise.all([
       supabase.from("clients").select("*").eq("id", id).single(),
       supabase
@@ -55,6 +55,12 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
         .eq("client_id", id)
         .order("created_at", { ascending: true })
         .limit(100),
+      supabase
+        .from("agent_events")
+        .select("id, kind, detail, created_at")
+        .eq("client_id", id)
+        .order("created_at", { ascending: false })
+        .limit(30),
     ]);
 
   if (clientError || !client) notFound();
@@ -77,6 +83,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       pendingReplies={pendingReplies}
       orders={(orders ?? []) as Order[]}
       messages={(messages ?? []) as Message[]}
+      events={(events ?? []) as AgentEvent[]}
       orderLink={getStorefrontLink(id)}
     />
   );

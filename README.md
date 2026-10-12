@@ -57,10 +57,11 @@ until real credentials are configured — see Setup below.
 - **Orders** (`/`): kanban — Pending review → New → Confirmed → In progress
   → Ready → Completed, filterable by category, manual entry, stats bar.
   Website orders show their itemised cart, address and contact in the panel.
-- **Clients** (`/clients`): B2B funnel kanban (New lead → Cold · has questions /
-  Warm · something blocking → Menu sent → First order → Recurring → Dormant).
-  The agent classifies leads itself and records the specific question or
-  blocker, which shows on the card and can be edited by hand; detail page with the Telegram
+- **Clients** (`/clients`): B2B funnel kanban: Нові → У розмові → Не замовили (talked,
+  never ordered) → Перше замовлення → Постійні. Clients move on their own
+  (first message, going quiet, 1st/2nd order) and with the ← → buttons; × deletes
+  one. The agent labels leads cold/warm and records the question or blocker,
+  shown on the card and editable; detail page with the Telegram
   conversation, standing order notes, order history, the client's personal
   ordering link, and any pending drafts.
 - **Pending Replies** (`/pending-replies`): every message awaiting approval,
@@ -121,6 +122,23 @@ Everything below applies to every reply and campaign draft, from the dashboard
 **Reactions**: the agent can put a 👍/🙏/❤/🔥/👌 on the client's message together with
 its reply (`react_to_message`; instantly for auto-sent replies, on ✅ for held
 drafts). When it does so is a team rule — edit it in Settings.
+
+## When an order counts
+
+A chat order enters the Замовлення board when the client approves the summary:
+in words, with a positive reaction on the summary message, by moving on to
+something else without objecting, or by saying nothing for `auto_confirm_minutes`
+(Settings; Telegram doesn't tell bots whether a message was read). Silence is
+checked on every incoming update, every dashboard visit and the daily cron — on a
+free Vercel plan there is no faster timer. After approval the next message is a
+**new** order unless the client explicitly asks to change the previous one
+(`amend_last_order`, only while the team hasn't confirmed it). "Прийнято ✅" must be
+backed by a placed order: otherwise it is placed automatically or the reply is held.
+Reactions on the summary need `message_reaction` in the webhook's allowed updates —
+press "Зареєструвати вебхук" in Settings once after upgrading.
+
+**Staff group**: Settings can split alerts into two Topics (📦 orders / 💬 messages)
+or send orders to a separate chat. `npm test` runs the suites in `tests/`.
 
 ## Ordering
 

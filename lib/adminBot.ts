@@ -7,7 +7,7 @@ import { teachFromText } from "@/lib/agent/teach";
 import { formatValidity, parseValidity } from "@/lib/agent/validity";
 import { isAnthropicConfigured } from "@/lib/agent/anthropic";
 import { reviseDraft } from "@/lib/agent/revise";
-import { answerCallbackQuery, editTelegramMessage, notifyAdmin } from "@/lib/telegram";
+import { answerCallbackQuery, editTelegramMessage, isStaffChat, notifyAdmin } from "@/lib/telegram";
 import { nextStatus, type OrderStatus } from "@/lib/types";
 import { rejectPendingReply, sendPendingReply } from "@/lib/replies";
 import type { TelegramUpdate } from "@/lib/agent/run";
@@ -21,7 +21,6 @@ const STATUS_LABEL: Record<OrderStatus, string> = {
   completed: "Виконано",
 };
 
-const isAdminChat = (chatId: number | string) => String(chatId) === process.env.TELEGRAM_ADMIN_GROUP_ID;
 
 // The "reply to send your own text" hint is moot once a draft is handled.
 const stripHint = (text: string) => text.replace(/\n*✏️ Щоб надіслати власний текст[^\n]*/, "");
@@ -38,7 +37,7 @@ export async function handleAdminUpdate(update: TelegramUpdate): Promise<boolean
   const cq = update.callback_query;
   if (cq) {
     const msg = cq.message;
-    if (!msg || !isAdminChat(msg.chat.id)) {
+    if (!msg || !(await isStaffChat(msg.chat.id))) {
       await answerCallbackQuery(cq.id, "Недоступно");
       return true;
     }
@@ -47,7 +46,7 @@ export async function handleAdminUpdate(update: TelegramUpdate): Promise<boolean
   }
 
   const msg = update.message;
-  if (msg && isAdminChat(msg.chat.id)) {
+  if (msg && (await isStaffChat(msg.chat.id))) {
     if (msg.text && !msg.from?.is_bot && (await handleTeachCommand(msg))) return true;
     if (msg.reply_to_message && msg.text && !msg.from?.is_bot) await handleReplyToDraft(msg);
     return true;
@@ -144,7 +143,7 @@ async function handleReplyToDraft(msg: NonNullable<TelegramUpdate["message"]>) {
     const own = text.replace(/^!+\s*/, "");
     if (!own) return;
     if (!pending) {
-      await notifyAdmin("Ця чернетка вже оброблена — власний текст не надіслано.", { replyTo: msg.message_id });
+      await notifyAdmin("Ця чернетка вже оброблена — власний текст не надіслано.", { replyTo: msg.message_id, threadId: msg.message_thread_id });
       return;
     }
     const result = await sendPendingReply(draft.id as string, { text: own });
@@ -153,13 +152,13 @@ async function handleReplyToDraft(msg: NonNullable<TelegramUpdate["message"]>) {
         await editTelegramMessage(chat, target.message_id, `${stripHint(target.text)}\n\n✏️ Надіслано власний текст · ${actor}`);
       }
     } else if (!result.alreadyHandled) {
-      await notifyAdmin(`Не вдалося надіслати: ${result.error}`, { replyTo: msg.message_id });
+      await notifyAdmin(`Не вдалося надіслати: ${result.error}`, { replyTo: msg.message_id, threadId: msg.message_thread_id });
     }
     return;
   }
 
   if (!isAnthropicConfigured()) {
-    await notifyAdmin("AI не налаштовано (ANTHROPIC_API_KEY) — не можу опрацювати зауваження.", { replyTo: msg.message_id });
+    await notifyAdmin("AI не налаштовано (ANTHROPIC_API_KEY) — не можу опрацювати зауваження.", { replyTo: msg.message_id, threadId: msg.message_thread_id });
     return;
   }
 
@@ -184,6 +183,7 @@ async function handleReplyToDraft(msg: NonNullable<TelegramUpdate["message"]>) {
   } catch (err) {
     await notifyAdmin(`Не вдалося опрацювати зауваження: ${err instanceof Error ? err.message : String(err)}`, {
       replyTo: msg.message_id,
+      threadId: msg.message_thread_id,
     });
     return;
   }
@@ -207,6 +207,7 @@ async function handleReplyToDraft(msg: NonNullable<TelegramUpdate["message"]>) {
     const ruleId = await addGuideline(db, revision.rule, "admin_feedback");
     await notifyAdmin(`📌 Запам'ятав правило для всіх наступних відповідей:\n«${revision.rule}»`, {
       replyTo: msg.message_id,
+      threadId: msg.message_thread_id,
       buttons: ruleId ? [[{ text: "🗑 Видалити правило", callback_data: `gd:${ruleId}` }]] : undefined,
     });
   } else {
@@ -216,7 +217,7 @@ async function handleReplyToDraft(msg: NonNullable<TelegramUpdate["message"]>) {
           ? "Переписав чернетку. Зауваження схоже на разове, тому як правило не зберіг."
           : "Не вдалося переписати чернетку за цим зауваженням — спробуйте сформулювати інакше або надішліть власний текст через «!»."
         : "Зауваження схоже на разове (стосується лише цього випадку), тому як правило не зберіг.",
-      { replyTo: msg.message_id }
+      { replyTo: msg.message_id, threadId: msg.message_thread_id }
     );
   }
 }
@@ -231,7 +232,7 @@ async function handleTeachCommand(msg: NonNullable<TelegramUpdate["message"]>): 
   if (!match) return false;
   const kind = match[1].toLowerCase();
   const body = (match[2] ?? "").trim();
-  const reply = { replyTo: msg.message_id };
+  const reply = { replyTo: msg.message_id, threadId: msg.message_thread_id };
   if (!body) {
     await notifyAdmin(
       kind === "rule"

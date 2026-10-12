@@ -1,6 +1,6 @@
 import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { AGENT_MODEL } from "@/lib/agent/anthropic";
-import { telegramApi } from "@/lib/telegram";
+import { getRouting, telegramApi, type Routing } from "@/lib/telegram";
 import { getOrderingRules } from "@/lib/orders";
 import { DEFAULT_ORDERING_RULES } from "@/lib/orderRules";
 import SetupPanel, { type SetupStatus } from "@/components/SetupPanel";
@@ -30,6 +30,7 @@ export default async function SetupPage() {
     supabase: null,
     telegram: null,
     rules: [],
+    routing: {} as Routing,
     ordering: DEFAULT_ORDERING_RULES,
     facts: [],
     examples: [],
@@ -68,6 +69,7 @@ export default async function SetupPage() {
       ]);
       status.facts = (facts ?? []) as SetupStatus["facts"];
       status.ordering = await getOrderingRules(db);
+      status.routing = await getRouting();
       status.examples = (examples ?? []) as SetupStatus["examples"];
     } catch (err) {
       status.supabase = { ok: false, error: err instanceof Error ? err.message : String(err) };

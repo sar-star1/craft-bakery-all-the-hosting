@@ -1,4 +1,5 @@
 import "server-only";
+import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase/server";
 
 export function isTelegramConfigured() {
   return Boolean(process.env.TELEGRAM_BOT_TOKEN);
@@ -13,7 +14,7 @@ export interface InlineButton {
 export async function sendTelegramMessage(
   chatId: string,
   text: string,
-  opts?: { buttons?: InlineButton[][]; replyTo?: number }
+  opts?: { buttons?: InlineButton[][]; replyTo?: number; threadId?: number }
 ): Promise<{ ok: boolean; error?: string; messageId?: number }> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) {
@@ -28,6 +29,7 @@ export async function sendTelegramMessage(
       chat_id: chatId,
       text: text.slice(0, 4096),
       ...(opts?.buttons ? { reply_markup: { inline_keyboard: opts.buttons } } : {}),
+      ...(opts?.threadId ? { message_thread_id: opts.threadId } : {}),
       ...(opts?.replyTo ? { reply_parameters: { message_id: opts.replyTo, allow_sending_without_reply: true } } : {}),
     }),
   });
@@ -117,17 +119,71 @@ export async function sendTypingAction(chatId: string): Promise<void> {
   }).catch(() => {});
 }
 
-// Admin notifications (new orders, mass-order flags, new drafts) go to this
-// separate group, distinct from any individual client chat.
+// Where staff alerts go. By default everything lands in the admin group. So that
+// orders can't be buried under chatter, the team can split them (Settings):
+//  - into two Topics of the group (📦 orders / 💬 messages), or
+//  - orders into a separate chat.
+export interface Routing {
+  orders_thread_id?: number;
+  messages_thread_id?: number;
+  orders_chat_id?: string;
+}
+
+let routingCache: { at: number; value: Routing } | null = null;
+
+export function clearRoutingCache() {
+  routingCache = null;
+}
+
+export async function getRouting(): Promise<Routing> {
+  if (routingCache && Date.now() - routingCache.at < 20_000) return routingCache.value;
+  let value: Routing = {};
+  if (isSupabaseConfigured()) {
+    try {
+      const { data } = await createSupabaseServerClient().from("site_content").select("content_json").eq("key", "telegram_routing").maybeSingle();
+      value = (data?.content_json ?? {}) as Routing;
+    } catch {
+      value = {};
+    }
+  }
+  routingCache = { at: Date.now(), value };
+  return value;
+}
+
+// Is this one of the chats where staff work (the admin group, or the separate orders chat)?
+export async function isStaffChat(chatId: number | string): Promise<boolean> {
+  const id = String(chatId);
+  if (id === process.env.TELEGRAM_ADMIN_GROUP_ID) return true;
+  return (await getRouting()).orders_chat_id === id;
+}
+
+// Admin notifications (new orders, mass-order flags, new drafts) go to the staff
+// group, distinct from any individual client chat. `kind: "order"` marks order
+// alerts so they can be routed to their own topic/chat; a `threadId` keeps a
+// reply inside the topic the admin wrote in.
 export async function notifyAdmin(
   text: string,
-  opts?: { buttons?: InlineButton[][]; replyTo?: number }
+  opts?: { buttons?: InlineButton[][]; replyTo?: number; threadId?: number; kind?: "order" | "message" }
 ): Promise<{ ok: boolean; error?: string; messageId?: number }> {
   const groupId = process.env.TELEGRAM_ADMIN_GROUP_ID;
   if (!groupId) {
     return { ok: false, error: "TELEGRAM_ADMIN_GROUP_ID is not configured." };
   }
-  return sendTelegramMessage(groupId, text, opts);
+  const routing = await getRouting();
+  let chat = groupId;
+  let threadId = opts?.threadId;
+  if (opts?.kind === "order" && routing.orders_chat_id) {
+    chat = routing.orders_chat_id;
+    threadId = undefined;
+  } else if (threadId === undefined) {
+    threadId = opts?.kind === "order" ? routing.orders_thread_id : routing.messages_thread_id;
+  }
+  const res = await sendTelegramMessage(chat, text, { buttons: opts?.buttons, replyTo: opts?.replyTo, threadId });
+  // A deleted topic or an unreachable chat must not lose the alert: fall back to the group itself.
+  if (!res.ok && (chat !== groupId || threadId !== undefined) && /thread|chat not found|not enough rights|TOPIC/i.test(res.error ?? "")) {
+    return sendTelegramMessage(groupId, text, { buttons: opts?.buttons });
+  }
+  return res;
 }
 
 // Raw Bot API call for the setup page; returns Telegram's `result` or an error.

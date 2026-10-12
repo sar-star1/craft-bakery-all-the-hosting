@@ -14,7 +14,10 @@ create table clients (
   -- client can be 'recurring' and still show 'dormant' status if they've
   -- gone quiet. Drives the grouped Clients pipeline view.
   pipeline_stage text not null default 'new_lead'
-    check (pipeline_stage in ('new_lead', 'cold', 'warm', 'menu_sent', 'first_order', 'recurring', 'dormant')),
+    check (pipeline_stage in ('new_lead', 'in_conversation', 'dormant', 'first_order', 'recurring')),
+  -- new_lead: just arrived · in_conversation: talking · dormant: talked, never ordered
+  -- first_order: one order · recurring: two or more
+  lead_temperature text check (lead_temperature in ('cold', 'warm')),  -- cold: has questions · warm: something blocks them
   blocker_note text,
   fop text,                    -- remembered from orders, so repeat clients only confirm
   delivery_address text,
@@ -149,6 +152,9 @@ create table pending_replies (
   status text not null default 'awaiting_approval'
     check (status in ('awaiting_approval', 'approved_sent', 'rejected')),
   attachments jsonb not null default '[]'::jsonb,  -- files sent with a campaign message
+  reaction text,                         -- emoji to put on the client's message together with this reply
+  reaction_message_id bigint,
+  shows_summary boolean not null default false,  -- carries an order summary (what a 👍 approves)
   edited boolean not null default false,   -- rewritten from admin feedback before approval
   admin_message_id bigint,   -- the alert in the admin Telegram group (buttons + reply-to-edit)
   created_at timestamptz default now()
@@ -247,7 +253,8 @@ on conflict (id) do nothing;
 -- Ordering numbers the team edits in Settings: smallest order, free-delivery
 -- threshold and the fee below it (all UAH).
 insert into site_content (key, content_json) values
-  ('ordering_rules', '{"min_order_total": 1000, "free_delivery_from": 2000, "delivery_fee": 250}'::jsonb)
+  ('ordering_rules', '{"min_order_total": 1000, "free_delivery_from": 2000, "delivery_fee": 250, "auto_confirm_minutes": 30}'::jsonb),
+  ('telegram_routing', '{}'::jsonb)   -- where staff alerts go: orders topic/chat (Settings)
 on conflict (key) do nothing;
 
 -- Public website (peremogabakery.com.ua) text and photos, edited under
@@ -281,3 +288,16 @@ alter table website_publishes enable row level security;
 insert into storage.buckets (id, name, public)
 values ('website-images', 'website-images', true)
 on conflict (id) do nothing;
+
+-- What the agent did on each turn: tools used, reactions (and whether Telegram
+-- accepted them), orders placed or amended, safety-net actions. Shown on the
+-- client page as "Журнал агента".
+create table agent_events (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid references clients(id) on delete cascade,
+  kind text not null,
+  detail jsonb not null default '{}'::jsonb,
+  created_at timestamptz default now()
+);
+create index agent_events_client_idx on agent_events(client_id, created_at desc);
+alter table agent_events enable row level security;

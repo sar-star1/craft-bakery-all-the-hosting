@@ -2,7 +2,8 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { updateClientBlockerNote, updateClientPipelineStage } from "@/app/actions";
+import { useRouter } from "next/navigation";
+import { deleteClient, updateClientBlockerNote, updateClientPipelineStage } from "@/app/actions";
 import type { Lang } from "@/lib/i18n";
 import {
   CLIENT_STATUS_BADGE,
@@ -11,7 +12,7 @@ import {
   PIPELINE_STAGE_KEY,
   STR,
 } from "@/lib/i18n";
-import { PIPELINE_STAGES, type Client, type Conversation, type Message, type Order, type PendingReply } from "@/lib/types";
+import { PIPELINE_STAGES, type AgentEvent, type Client, type Conversation, type Message, type Order, type PendingReply } from "@/lib/types";
 import { formatDateTime, formatMoney } from "@/lib/utils";
 import Sidebar from "./Sidebar";
 import LangToggle from "./LangToggle";
@@ -23,6 +24,7 @@ export default function ClientDetail({
   pendingReplies,
   orders,
   messages,
+  events = [],
   orderLink,
   sampleMode = false,
 }: {
@@ -31,6 +33,7 @@ export default function ClientDetail({
   pendingReplies: PendingReply[];
   orders: Order[];
   messages: Message[];
+  events?: AgentEvent[];
   orderLink: string | null;
   sampleMode?: boolean;
 }) {
@@ -39,6 +42,9 @@ export default function ClientDetail({
   const [blocker, setBlocker] = useState(client.blocker_note ?? "");
   const [blockerSaved, setBlockerSaved] = useState(false);
   const [, startTransition] = useTransition();
+  const router = useRouter();
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [alsoOrders, setAlsoOrders] = useState(false);
   const t = STR[lang];
 
   const handleStageChange = (next: Client["pipeline_stage"]) => {
@@ -46,6 +52,14 @@ export default function ClientDetail({
     if (sampleMode) return;
     startTransition(async () => {
       await updateClientPipelineStage(client.id, next);
+    });
+  };
+
+  const removeClient = () => {
+    if (sampleMode) return router.push("/clients");
+    startTransition(async () => {
+      await deleteClient(client.id, alsoOrders);
+      router.push("/clients");
     });
   };
 
@@ -233,7 +247,86 @@ export default function ClientDetail({
             </div>
           )}
         </section>
+
+        {events.length > 0 && (
+          <section className="mt-8">
+            <h2 className="font-serif text-lg mb-1">{lang === "uk" ? "Журнал агента" : "Agent log"}</h2>
+            <p className="text-[12px] text-stone-400 mb-2">
+              {lang === "uk" ? "Що агент робив у розмові: інструменти, реакції, замовлення." : "What the agent did: tools, reactions, orders."}
+            </p>
+            <ul className="bg-white rounded-md border border-stone-200 divide-y divide-stone-100 text-[12px]">
+              {events.map((e) => (
+                <li key={e.id} className="px-3 py-2 flex gap-3">
+                  <span className="text-stone-400 whitespace-nowrap">{formatDateTime(e.created_at, lang)}</span>
+                  <span className="text-stone-700 min-w-0 break-words">{describeEvent(e, lang)}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        <section className="mt-10 pt-6 border-t border-stone-200">
+          {!confirmingDelete ? (
+            <button onClick={() => setConfirmingDelete(true)} className="text-[12px] text-stone-400 hover:text-rose-700">
+              {lang === "uk" ? "Видалити клієнта" : "Delete client"}
+            </button>
+          ) : (
+            <div className="border border-rose-200 bg-rose-50 rounded p-3 text-sm">
+              <p className="text-rose-900 mb-2">
+                {lang === "uk"
+                  ? "Клієнта, його переписку й чернетки буде видалено. Якщо він знову напише боту — з'явиться як новий."
+                  : "The client, their conversation and drafts will be deleted. If they write again they come back as a new lead."}
+              </p>
+              <label className="flex items-center gap-2 text-[13px] text-stone-700 mb-3">
+                <input type="checkbox" checked={alsoOrders} onChange={(e) => setAlsoOrders(e.target.checked)} />
+                {lang === "uk" ? "Також видалити всі його замовлення (інакше вони залишаться без прив'язки)" : "Also delete all their orders (otherwise they stay, unlinked)"}
+              </label>
+              <div className="flex gap-2">
+                <button onClick={removeClient} className="text-[13px] bg-rose-700 text-white px-3 py-1.5 rounded hover:bg-rose-800">
+                  {lang === "uk" ? "Видалити" : "Delete"}
+                </button>
+                <button onClick={() => setConfirmingDelete(false)} className="text-[13px] text-stone-500 px-2">
+                  {lang === "uk" ? "Скасувати" : "Cancel"}
+                </button>
+              </div>
+            </div>
+          )}
+        </section>
       </main>
     </div>
   );
+}
+
+function describeEvent(e: AgentEvent, lang: Lang): string {
+  const d = e.detail as Record<string, unknown>;
+  const uk = lang === "uk";
+  switch (e.kind) {
+    case "reaction":
+      return d.ok
+        ? `${uk ? "Реакцію" : "Reaction"} ${d.emoji} ${uk ? "поставлено" : "set"} ✅`
+        : `${uk ? "Реакцію" : "Reaction"} ${d.emoji} ${uk ? "не вдалося поставити" : "failed"}: ${String(d.error ?? "")}`;
+    case "turn": {
+      const tools = (d.tools as string[] | undefined) ?? [];
+      return [
+        uk ? "Відповідь" : "Reply",
+        tools.length ? `${uk ? "інструменти" : "tools"}: ${[...new Set(tools)].join(", ")}` : "",
+        d.reaction ? `${uk ? "реакція" : "reaction"} ${d.reaction}` : "",
+        d.gated ? `${uk ? "чекала підтвердження" : "held for approval"}${d.reason ? ` (${d.reason})` : ""}` : "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
+    }
+    case "order_placed":
+      return `${uk ? "Замовлення оформлено" : "Order placed"} · ${d.total} ₴ · ${String(d.approval)}`;
+    case "order_amended":
+      return `${uk ? "Замовлення змінено" : "Order amended"} · ${d.total} ₴`;
+    case "reaction_approval":
+      return `${uk ? "Реакція клієнта на підсумок" : "Client reaction on the summary"} ${((d.emojis as string[]) ?? []).join(" ")} → ${d.placed ? (uk ? "замовлення оформлено" : "order placed") : String(d.reason ?? "—")}`;
+    case "safety_net":
+      return d.action === "placed_for_agent"
+        ? uk ? "Агент написав «прийнято» — замовлення оформлено автоматично" : "Agent said accepted — order placed automatically"
+        : uk ? "Агент написав «прийнято», але замовлення не було — відповідь затримано" : "Agent claimed acceptance without an order — held";
+    default:
+      return `${e.kind} ${JSON.stringify(d)}`;
+  }
 }

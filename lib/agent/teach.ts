@@ -12,6 +12,7 @@ const SETTING_LABEL: Record<string, string> = {
   min_order_total: "Мінімальна сума замовлення",
   free_delivery_from: "Безкоштовна доставка від",
   delivery_fee: "Вартість доставки",
+  auto_confirm_minutes: "Через скільки хвилин без відповіді клієнта оформлювати замовлення",
 };
 
 export type TeachResult =
@@ -34,13 +35,13 @@ export async function teachFromText(db: Db, input: string, source: "teach"): Pro
 ТИП: правило | факт | налаштування
 ТЕКСТ: <одне ясне речення українською, у наказовому способі для правила («Звертайся на ви.») або як констатація для факту («Цього тижня немає доставки на Троєщину.»)>
 ДО: <YYYY-MM-DD останній день дії, якщо інструкція тимчасова («цього тижня» = найближча неділя, «до 15.10» тощо), інакше "немає">
-КЛЮЧ: <min_order_total | free_delivery_from | delivery_fee, якщо це зміна числа в умовах замовлення, інакше "немає">
-ЗНАЧЕННЯ: <число в гривнях для налаштування, інакше "немає">
+КЛЮЧ: <min_order_total | free_delivery_from | delivery_fee | auto_confirm_minutes, якщо це зміна числа в умовах замовлення, інакше "немає">
+ЗНАЧЕННЯ: <число (гривні, а для auto_confirm_minutes — хвилини), інакше "немає">
 
 Підказки:
 - правило = як поводитись, звучати, що пропонувати, чого не робити.
 - факт = інформація про пекарню чи її роботу (обмеження, графік, реквізити, що робимо/не робимо), у тому числі тимчасова.
-- налаштування = мінімальна сума замовлення (min_order_total), поріг безкоштовної доставки (free_delivery_from), вартість доставки (delivery_fee).`,
+- налаштування = мінімальна сума замовлення (min_order_total), поріг безкоштовної доставки (free_delivery_from), вартість доставки (delivery_fee), через скільки ХВИЛИН мовчання клієнта після підсумку замовлення оформлюється саме (auto_confirm_minutes; 0 — вимкнути).`,
     messages: [{ role: "user", content: text }],
   });
   const out = response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("\n");
@@ -64,7 +65,7 @@ export async function teachFromText(db: Db, input: string, source: "teach"): Pro
         id: null,
         text: cleaned,
         expires: null,
-        message: `${SETTING_LABEL[key]}: було ${current[key as keyof typeof current]} ₴, стало ${value} ₴ (діє і в чаті, і на сайті).`,
+        message: `${SETTING_LABEL[key]}: було ${current[key as keyof typeof current]} ${key === "auto_confirm_minutes" ? "хв" : "₴"}, стало ${value} ${key === "auto_confirm_minutes" ? "хв" : "₴"} (діє і в чаті, і на сайті).`,
       };
     }
   }

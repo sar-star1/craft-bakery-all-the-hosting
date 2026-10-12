@@ -163,6 +163,37 @@ export async function createClient(
   return { clientId: data.id, deepLink: getBotDeepLink(data.id) };
 }
 
+// Removes an order from the board for good (e.g. a test or duplicate order).
+export async function deleteOrder(id: string) {
+  await requireAdmin();
+  const supabase = createSupabaseServerClient();
+  const { error } = await supabase.from("orders").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+  revalidatePath("/");
+  revalidatePath("/clients");
+}
+
+// Deletes a client and everything that hangs off them (conversation, messages,
+// drafts, flags). Their orders are kept but detached, unless `deleteOrders`.
+// If the person writes to the bot again, a fresh lead is created.
+export async function deleteClient(id: string, deleteOrders = false) {
+  await requireAdmin();
+  const supabase = createSupabaseServerClient();
+  const step = async (label: string, q: PromiseLike<{ error: { message: string } | null }>) => {
+    const { error } = await q;
+    if (error) throw new Error(`${label}: ${error.message}`);
+  };
+  await step("orders", deleteOrders ? supabase.from("orders").delete().eq("client_id", id) : supabase.from("orders").update({ client_id: null }).eq("client_id", id));
+  await step("drafts", supabase.from("pending_replies").delete().eq("client_id", id));
+  await step("flags", supabase.from("mass_order_flags").delete().eq("client_id", id));
+  await step("messages", supabase.from("messages").delete().eq("client_id", id));
+  await step("conversations", supabase.from("conversations").delete().eq("client_id", id));
+  await step("client", supabase.from("clients").delete().eq("id", id));
+  revalidatePath("/");
+  revalidatePath("/clients");
+  revalidatePath("/pending-replies");
+}
+
 export async function updateClientPipelineStage(id: string, stage: PipelineStage) {
   await requireAdmin();
   const supabase = createSupabaseServerClient();

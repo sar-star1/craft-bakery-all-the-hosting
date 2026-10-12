@@ -104,6 +104,13 @@ export interface Client {
   created_at: string;
 }
 
+export interface AgentEvent {
+  id: string;
+  kind: string;
+  detail: Record<string, unknown>;
+  created_at: string;
+}
+
 export type ConversationStatus = "gathering" | "confirming" | "committed" | "abandoned";
 
 export interface Conversation {

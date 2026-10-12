@@ -32,6 +32,8 @@ export interface TelegramMessage {
   chat: { id: number; type: string };
   from?: { id: number; is_bot?: boolean; first_name?: string; last_name?: string; username?: string };
   reply_to_message?: { message_id: number; text?: string };
+  // Set when the message was written inside a forum topic of the staff group.
+  message_thread_id?: number;
 }
 export interface TelegramUpdate {
   update_id: number;

@@ -4,6 +4,11 @@ import { useState, useTransition } from "react";
 import {
   addAgentFact,
   addAgentRule,
+  clearGroupRouting,
+  saveOrdersChat,
+  setupGroupTopics,
+  updateAgentFact,
+  updateAgentRule,
   saveOrderingRules,
   teachAgentAction,
   deleteAgentExample,
@@ -29,6 +34,7 @@ export interface SetupStatus {
     | null;
   rules: { id: string; text: string; source: string; expires_at: string | null }[];
   ordering: OrderingRules;
+  routing: { orders_thread_id?: number; messages_thread_id?: number; orders_chat_id?: string };
   facts: { id: string; text: string; expires_at: string | null }[];
   examples: { id: string; client_message: string; reply: string; quality: string }[];
   telegram:
@@ -95,17 +101,22 @@ function TeachList({
   placeholder,
   items,
   onAdd,
+  onEdit,
   onDelete,
 }: {
   intro: string;
   empty: string;
   placeholder: string;
-  items: { id: string; text: string; tag?: string }[];
+  items: { id: string; text: string; tag?: string; expires?: string | null }[];
   onAdd: (text: string, expiresAt: string | null) => Promise<SetupActionResult>;
+  onEdit: (id: string, text: string, expiresAt: string | null) => Promise<SetupActionResult>;
   onDelete: (id: string) => Promise<SetupActionResult>;
 }) {
   const [text, setText] = useState("");
   const [until, setUntil] = useState("");
+  const [editing, setEditing] = useState<string | null>(null);
+  const [editText, setEditText] = useState("");
+  const [editUntil, setEditUntil] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const run = (fn: () => Promise<SetupActionResult>, after?: () => void) =>
@@ -121,21 +132,60 @@ function TeachList({
         <p className="text-sm text-stone-400 mb-3">{empty}</p>
       ) : (
         <ul className="space-y-1.5 mb-3">
-          {items.map((r) => (
-            <li key={r.id} className="flex items-start gap-2 text-sm">
-              <span className="flex-1 text-stone-700">
-                {r.text}
-                {r.tag && <span className="text-stone-400 text-[11px]"> · {r.tag}</span>}
-              </span>
-              <button
-                disabled={pending}
-                onClick={() => run(() => onDelete(r.id))}
-                className="text-[12px] text-stone-400 hover:text-rose-700 shrink-0"
-              >
-                Видалити
-              </button>
-            </li>
-          ))}
+          {items.map((r) =>
+            editing === r.id ? (
+              <li key={r.id} className="flex flex-wrap items-center gap-2 text-sm">
+                <input
+                  value={editText}
+                  onChange={(e) => setEditText(e.target.value)}
+                  maxLength={600}
+                  className="flex-1 min-w-[12rem] border border-stone-300 rounded px-3 py-1.5 text-sm"
+                />
+                <input
+                  type="date"
+                  value={editUntil}
+                  onChange={(e) => setEditUntil(e.target.value)}
+                  title="Діє до (необов'язково)"
+                  className="border border-stone-200 rounded px-2 py-1.5 text-sm w-[9.5rem]"
+                />
+                <button
+                  disabled={pending || !editText.trim()}
+                  onClick={() => run(() => onEdit(r.id, editText, editUntil || null), () => setEditing(null))}
+                  className="text-[12px] bg-stone-900 text-white px-2.5 py-1.5 rounded disabled:opacity-50"
+                >
+                  Зберегти
+                </button>
+                <button onClick={() => setEditing(null)} className="text-[12px] text-stone-400">
+                  Скасувати
+                </button>
+              </li>
+            ) : (
+              <li key={r.id} className="flex items-start gap-2 text-sm">
+                <span className="flex-1 text-stone-700">
+                  {r.text}
+                  {r.tag && <span className="text-stone-400 text-[11px]"> · {r.tag}</span>}
+                </span>
+                <button
+                  disabled={pending}
+                  onClick={() => {
+                    setEditing(r.id);
+                    setEditText(r.text);
+                    setEditUntil(r.expires ?? "");
+                  }}
+                  className="text-[12px] text-stone-400 hover:text-stone-800 shrink-0"
+                >
+                  Редагувати
+                </button>
+                <button
+                  disabled={pending}
+                  onClick={() => run(() => onDelete(r.id))}
+                  className="text-[12px] text-stone-400 hover:text-rose-700 shrink-0"
+                >
+                  Видалити
+                </button>
+              </li>
+            )
+          )}
         </ul>
       )}
       <div className="flex gap-2">
@@ -260,10 +310,11 @@ function OrderingRulesForm({ initial }: { initial: OrderingRules }) {
   );
   return (
     <>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {field("min_order_total", "Мінімальна сума замовлення, ₴")}
         {field("free_delivery_from", "Безкоштовна доставка від, ₴")}
         {field("delivery_fee", "Доставка нижче порогу, ₴")}
+        {field("auto_confirm_minutes", "Оформлювати замовлення, якщо клієнт мовчить, через (хв; 0 — вимкнути)")}
       </div>
       <button
         disabled={pending}
@@ -272,6 +323,61 @@ function OrderingRulesForm({ initial }: { initial: OrderingRules }) {
       >
         Зберегти
       </button>
+      {msg && <p className={`text-[12px] mt-1.5 ${msg.ok ? "text-emerald-700" : "text-rose-700"}`}>{msg.message}</p>}
+    </>
+  );
+}
+
+function GroupSorting({ routing }: { routing: SetupStatus["routing"] }) {
+  const [chatId, setChatId] = useState("");
+  const [msg, setMsg] = useState<SetupActionResult | null>(null);
+  const [pending, startTransition] = useTransition();
+  const run = (fn: () => Promise<SetupActionResult>) => startTransition(async () => setMsg(await fn()));
+  const sorted = Boolean(routing.orders_thread_id || routing.orders_chat_id);
+  return (
+    <>
+      <p className="text-[12px] text-stone-500 mb-2">
+        Щоб замовлення не губилися серед чернеток і чату, їх можна відокремити: або в окрему <b>тему</b> цієї ж групи, або в окремий чат.
+      </p>
+      <Row ok={sorted}>
+        {routing.orders_thread_id
+          ? "Замовлення йдуть у тему «📦 Замовлення», решта сповіщень — у «💬 Повідомлення»."
+          : routing.orders_chat_id
+            ? `Замовлення йдуть в окремий чат (${routing.orders_chat_id}).`
+            : "Усе сповіщення приходять в одну групу."}
+      </Row>
+      <div className="flex flex-wrap gap-2 mt-2">
+        <button
+          disabled={pending}
+          onClick={() => run(setupGroupTopics)}
+          className="text-[13px] bg-stone-900 text-white px-3 py-1.5 rounded hover:bg-stone-800 disabled:opacity-50"
+        >
+          Створити теми в групі
+        </button>
+        {sorted && (
+          <button disabled={pending} onClick={() => run(clearGroupRouting)} className="text-[13px] border border-stone-300 px-3 py-1.5 rounded hover:bg-stone-50">
+            Вимкнути розділення
+          </button>
+        )}
+      </div>
+      <p className="text-[11px] text-stone-400 mt-1">
+        Для тем: у групі увімкніть «Теми» (⋯ → Керування групою → Теми) і зробіть бота адміністратором з правом керувати темами.
+      </p>
+      <div className="flex gap-2 mt-3">
+        <input
+          value={chatId}
+          onChange={(e) => setChatId(e.target.value)}
+          placeholder="Або ID окремого чату для замовлень (з команди /chatid)"
+          className="flex-1 min-w-0 border border-stone-200 rounded px-3 py-1.5 text-sm"
+        />
+        <button
+          disabled={pending || !chatId.trim()}
+          onClick={() => run(() => saveOrdersChat(chatId))}
+          className="text-[13px] border border-stone-300 px-3 py-1.5 rounded hover:bg-stone-50 disabled:opacity-50"
+        >
+          Зберегти
+        </button>
+      </div>
       {msg && <p className={`text-[12px] mt-1.5 ${msg.ok ? "text-emerald-700" : "text-rose-700"}`}>{msg.message}</p>}
     </>
   );
@@ -364,6 +470,11 @@ export default function SetupPanel({ status }: { status: SetupStatus }) {
         </section>
 
         <section className="bg-white rounded-md border border-stone-200 p-4 mb-5">
+          <h2 className="font-serif text-lg mb-2">4а. Сортування сповіщень у групі</h2>
+          <GroupSorting routing={status.routing} />
+        </section>
+
+        <section className="bg-white rounded-md border border-stone-200 p-4 mb-5">
           <h2 className="font-serif text-lg mb-2">5. Чого навчаємо агента</h2>
           <p className="text-[12px] text-stone-500 mb-4">
             Три види пам&apos;яті. <b>Правила</b> — як поводитись і звучати. <b>Факти</b> — що агент знає про пекарню.
@@ -382,8 +493,10 @@ export default function SetupPanel({ status }: { status: SetupStatus }) {
               id: r.id,
               text: r.text,
               tag: [r.source === "admin_feedback" || r.source === "teach" ? "з групи" : "", r.expires_at ? `діє до ${r.expires_at.split("-").reverse().join(".")}` : ""].filter(Boolean).join(" · ") || undefined,
+              expires: r.expires_at,
             }))}
             onAdd={addAgentRule}
+            onEdit={updateAgentRule}
             onDelete={deleteAgentRule}
           />
           <h3 className="font-medium text-sm mt-5 mb-1">Факти про пекарню</h3>
@@ -395,8 +508,10 @@ export default function SetupPanel({ status }: { status: SetupStatus }) {
               id: f.id,
               text: f.text,
               tag: f.expires_at ? `діє до ${f.expires_at.split("-").reverse().join(".")}` : undefined,
+              expires: f.expires_at,
             }))}
             onAdd={addAgentFact}
+            onEdit={updateAgentFact}
             onDelete={deleteAgentFact}
           />
           <h3 className="font-medium text-sm mt-5 mb-1">Приклади відповідей</h3>

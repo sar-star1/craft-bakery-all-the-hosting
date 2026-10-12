@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { advanceOrderStatus, linkOrderToClient, revertOrderStatus } from "@/app/actions";
+import { advanceOrderStatus, deleteOrder, linkOrderToClient, revertOrderStatus } from "@/app/actions";
 import type { Lang } from "@/lib/i18n";
 import { STR } from "@/lib/i18n";
 import { nextStatus, prevStatus, type Order } from "@/lib/types";
@@ -55,6 +55,15 @@ export default function Dashboard({
     startTransition(async () => {
       const order = orders.find((o) => o.id === id);
       if (order) await revertOrderStatus(id, order.status);
+    });
+  };
+
+  const remove = (id: string) => {
+    setOrders((prev) => prev.filter((o) => o.id !== id));
+    setOpenOrderId(null);
+    if (sampleMode) return;
+    startTransition(async () => {
+      await deleteOrder(id);
     });
   };
 
@@ -141,6 +150,7 @@ export default function Dashboard({
         onBack={back}
         clients={clients}
         onLink={link}
+        onDelete={remove}
       />
 
       {showForm && (
