@@ -29,7 +29,7 @@ export async function sendPendingReply(id: string, opts?: { text?: string }): Pr
 
   const { data: reply } = await db
     .from("pending_replies")
-    .select("id, draft_text, client_id, conversation_id, status, edited, reply_type, attachments, reaction, reaction_message_id, shows_summary")
+    .select("id, draft_text, client_id, conversation_id, status, edited, reply_type, attachments, reaction, reaction_message_id, shows_summary, created_at")
     .eq("id", id)
     .maybeSingle();
   if (!reply) return { ok: false, error: "Draft not found." };
@@ -73,6 +73,9 @@ export async function sendPendingReply(id: string, opts?: { text?: string }): Pr
     direction: "out",
     text,
     telegram_message_id: sent.messageId ?? null,
+    // Stamped when the reply was written, not when it was approved, so the conversation
+    // keeps reading in the order things were said even if the client wrote again meanwhile.
+    created_at: reply.created_at ?? undefined,
   });
   // The message that carries the order summary is what a client's 👍 approves.
   if (reply.shows_summary && reply.conversation_id && sent.messageId) {

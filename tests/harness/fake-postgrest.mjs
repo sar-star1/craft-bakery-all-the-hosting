@@ -29,7 +29,12 @@ export function start(port) {
         const t = u.pathname.replace("/rest/v1/", "");
         const rows = (tables[t] ??= []);
         const filters = [...u.searchParams].filter(([k]) => !["select", "order", "limit", "offset", "columns"].includes(k));
-        const sel = () => rows.filter((r) => filters.every(([k, e]) => match(r, k, e)));
+        const orMatch = (row, expr) =>
+          expr.replace(/^\(|\)$/g, "").split(",").some((part) => {
+            const [col, ...rest] = part.split(".");
+            return match(row, col, rest.join("."));
+          });
+        const sel = () => rows.filter((r) => filters.every(([k, e]) => (k === "or" ? orMatch(r, e) : match(r, k, e))));
         const wantObj = (req.headers.accept ?? "").includes("vnd.pgrst.object");
         const send = (code, data) => {
           resp.statusCode = code;

@@ -18,6 +18,8 @@ import {
 import { notifyAdmin, sendTelegramMessage, sendTypingAction, setMessageReaction, startPayloadToClientId } from "@/lib/telegram";
 import type { ClientSource, PipelineStage } from "@/lib/types";
 import { AGENT_MODEL, getAnthropic, isAnthropicConfigured } from "./anthropic";
+import { buildHistory, type HistoryRow } from "./history";
+import { withClientLock } from "./lock";
 import { getActiveGuidelines } from "./guidelines";
 import { PAYMENT_LABEL } from "@/lib/orderRules";
 import { getExamples } from "./memory";
@@ -287,6 +289,18 @@ async function handleMessage(msg: TelegramMessage, text: string) {
       .eq("id", clientRow.id),
   ]);
 
+  // One run per client at a time: a second quick message waits for the first reply.
+  await withClientLock(db, clientRow.id, () => respondToMessage(db, msg, text, chatId, clientRow.id));
+}
+
+// The part of handling a message that talks to the AI. Runs under the client's lock,
+// so the client record and conversation are re-read here: the run that held the lock
+// before us may have placed an order or changed the draft.
+async function respondToMessage(db: Db, msg: TelegramMessage, text: string, chatId: string, clientId: string) {
+  const { data: freshClient } = await db.from("clients").select(CLIENT_COLUMNS).eq("id", clientId).single();
+  const clientRow = freshClient as ClientRow;
+  const conversation = await getOrCreateConversation(db, clientRow.id);
+
   if (!isAnthropicConfigured()) {
     await notifyAdmin(
       `Повідомлення від ${clientRow.business_name}: «${text.slice(0, 300)}»\n(AI-агент не налаштовано — ANTHROPIC_API_KEY відсутній, відповідь не надіслано.)${dashboardLink(`/clients/${clientRow.id}`)}`
@@ -315,7 +329,7 @@ async function handleMessage(msg: TelegramMessage, text: string) {
     inboundCount: inboundCount ?? 1,
   };
 
-  const rawReply = await runAgent(db, ctx, clientRow, conversation.captured_fields);
+  const rawReply = await runAgent(db, ctx, clientRow, conversation.captured_fields, { telegramMessageId: msg.message_id, text });
 
   if (!rawReply) {
     await notifyAdmin(
@@ -426,19 +440,18 @@ async function runAgent(
   db: Db,
   ctx: ToolContext,
   client: ClientRow,
-  capturedFields: Record<string, unknown>
+  capturedFields: Record<string, unknown>,
+  current: { telegramMessageId: number; text: string }
 ): Promise<string | null> {
   const { data: rows } = await db
     .from("messages")
-    .select("direction, text")
+    .select("direction, text, created_at, telegram_message_id")
     .eq("client_id", client.id)
     .order("created_at", { ascending: false })
     .limit(HISTORY_LIMIT);
 
-  const messages: Anthropic.MessageParam[] = (rows ?? [])
-    .reverse()
-    .map((m) => ({ role: m.direction === "in" ? ("user" as const) : ("assistant" as const), content: m.text as string }));
-  while (messages.length > 0 && messages[0].role !== "user") messages.shift();
+  // The message being answered goes last, whatever order the replies were stored in.
+  const messages: Anthropic.MessageParam[] = buildHistory((rows ?? []) as HistoryRow[], current);
 
   const [guidelines, examples, { count: ordersCount }] = await Promise.all([
     getActiveGuidelines(db),
