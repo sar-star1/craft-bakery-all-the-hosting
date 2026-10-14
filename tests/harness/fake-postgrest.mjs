@@ -16,6 +16,8 @@ const match = (row, key, expr) => {
   if (op === "gte") return String(v) >= val;
   if (op === "gt") return String(v) > val;
   if (op === "lt") return String(v) < val;
+  if (op === "lte") return String(v) <= val;
+  if (op === "not") return !match(row, key, val);
   return true;
 };
 

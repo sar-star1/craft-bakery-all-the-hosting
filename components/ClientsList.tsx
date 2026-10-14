@@ -59,6 +59,11 @@ function ClientCard({
           {client.lead_temperature === "warm" ? t.tempWarm : t.tempCold}
         </span>
       )}
+      {client.agent_paused && (
+        <span className="inline-block mt-2 ml-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-violet-100 text-violet-900">
+          {lang === "uk" ? "🙋 веде команда" : "🙋 team"}
+        </span>
+      )}
       {client.blocker_note && !hasOrdered && (
         <p className="text-[12px] text-stone-600 mt-2 leading-snug line-clamp-3 bg-stone-50 rounded px-2 py-1.5">
           {client.blocker_note}

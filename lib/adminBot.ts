@@ -10,6 +10,7 @@ import { reviseDraft } from "@/lib/agent/revise";
 import { answerCallbackQuery, editTelegramMessage, isStaffChat, notifyAdmin } from "@/lib/telegram";
 import { nextStatus, type OrderStatus } from "@/lib/types";
 import { rejectPendingReply, sendPendingReply } from "@/lib/replies";
+import { announceTakeover, sendAsTeam, setAgentPaused } from "@/lib/takeover";
 import type { TelegramUpdate } from "@/lib/agent/run";
 
 const STATUS_LABEL: Record<OrderStatus, string> = {
@@ -82,6 +83,21 @@ async function handleButton(
     return;
   }
 
+  const takeover = data.match(/^tk:([0-9a-f-]{36})$/);
+  if (takeover) {
+    await answerCallbackQuery(queryId, "Агент на паузі");
+    await announceTakeover(createSupabaseServerClient(), takeover[1], actor);
+    return;
+  }
+
+  const handBack = data.match(/^ra:([0-9a-f-]{36})$/);
+  if (handBack) {
+    const res = await setAgentPaused(createSupabaseServerClient(), handBack[1], false, actor);
+    await answerCallbackQuery(queryId, res.ok ? "Агент знову відповідає" : res.error);
+    if (res.ok) await editTelegramMessage(chat, messageId, `${original}\n\n🤖 Розмову повернуто агенту · ${actor}`);
+    return;
+  }
+
   const fact = data.match(/^kd:([0-9a-f-]{36})$/);
   if (fact) {
     await createSupabaseServerClient().from("agent_knowledge").delete().eq("id", fact[1]);
@@ -131,9 +147,17 @@ async function handleReplyToDraft(msg: NonNullable<TelegramUpdate["message"]>) {
   const text = (msg.text ?? "").trim();
   if (!text) return;
 
+  // A reply to a message relayed from a client we are talking to ourselves: goes to the client as is.
+  const { data: relayed } = await db.from("relayed_messages").select("client_id").eq("admin_message_id", target.message_id).maybeSingle();
+  if (relayed) {
+    const res = await sendAsTeam(db, relayed.client_id as string, text.replace(/^!+\s*/, ""), actor);
+    await notifyAdmin(res.ok ? "✅ Надіслано клієнту" : `Не вдалося надіслати: ${res.error}`, { replyTo: msg.message_id, threadId: msg.message_thread_id });
+    return;
+  }
+
   const { data: draft } = await db
     .from("pending_replies")
-    .select("id, client_id, draft_text, status, reply_type, attachments")
+    .select("id, client_id, draft_text, status, reply_type, attachments, team_question")
     .eq("admin_message_id", target.message_id)
     .maybeSingle();
   if (!draft) return;
@@ -179,6 +203,7 @@ async function handleReplyToDraft(msg: NonNullable<TelegramUpdate["message"]>) {
       history,
       guidelines,
       rewrite: pending,
+      question: pending ? (draft.team_question as string | null) : null,
     });
   } catch (err) {
     await notifyAdmin(`Не вдалося опрацювати зауваження: ${err instanceof Error ? err.message : String(err)}`, {
@@ -203,7 +228,18 @@ async function handleReplyToDraft(msg: NonNullable<TelegramUpdate["message"]>) {
     await editTelegramMessage(chat, target.message_id, alert.text, alert.buttons);
   }
 
-  if (revision.rule) {
+  if (revision.fact) {
+    const factId = await addKnowledge(db, revision.fact, "admin_group");
+    await notifyAdmin(`🧠 Запам'ятав як факт: «${revision.fact}»\nНаступного разу агент відповість сам.`, {
+      replyTo: msg.message_id,
+      threadId: msg.message_thread_id,
+      buttons: factId ? [[{ text: "🗑 Видалити факт", callback_data: `kd:${factId}` }]] : undefined,
+    });
+  }
+
+  if (revision.fact) {
+    // the fact message above already told the admin what was learned
+  } else if (revision.rule) {
     const ruleId = await addGuideline(db, revision.rule, "admin_feedback");
     await notifyAdmin(`📌 Запам'ятав правило для всіх наступних відповідей:\n«${revision.rule}»`, {
       replyTo: msg.message_id,
@@ -214,7 +250,9 @@ async function handleReplyToDraft(msg: NonNullable<TelegramUpdate["message"]>) {
     await notifyAdmin(
       pending
         ? revision.text
-          ? "Переписав чернетку. Зауваження схоже на разове, тому як правило не зберіг."
+          ? draft.team_question
+            ? "Склав відповідь клієнту з ваших слів — перевірте її в чернетці вище й натисніть ✅. Це схоже на разовий випадок, тому як факт не зберіг."
+            : "Переписав чернетку. Зауваження схоже на разове, тому як правило не зберіг."
           : "Не вдалося переписати чернетку за цим зауваженням — спробуйте сформулювати інакше або надішліть власний текст через «!»."
         : "Зауваження схоже на разове (стосується лише цього випадку), тому як правило не зберіг.",
       { replyTo: msg.message_id, threadId: msg.message_thread_id }

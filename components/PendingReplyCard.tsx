@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { approvePendingReply, rejectPendingReply } from "@/app/actions";
+import { answerPendingReply, approvePendingReply, rejectPendingReply } from "@/app/actions";
 import type { Lang } from "@/lib/i18n";
 import {
   PENDING_REPLY_STATUS_KEY,
@@ -29,6 +29,17 @@ export default function PendingReplyCard({
   const [status, setStatus] = useState<PendingReplyStatus>(reply.status);
   const [error, setError] = useState<string | undefined>();
   const [pending, startTransition] = useTransition();
+  const [answer, setAnswer] = useState("");
+
+  const sendAnswer = () => {
+    setError(undefined);
+    if (sampleMode) return setStatus("approved_sent");
+    startTransition(async () => {
+      const result = await answerPendingReply(reply.id, answer);
+      if (result.error) return setError(result.error);
+      setStatus("approved_sent");
+    });
+  };
 
   const resolve = (nextStatus: "approved_sent" | "rejected") => {
     setError(undefined);
@@ -60,6 +71,11 @@ export default function PendingReplyCard({
         </span>
       </div>
       {clientName && <p className="text-[12px] text-stone-600 font-medium mb-1">{clientName}</p>}
+      {reply.team_question && (
+        <p className="text-[13px] text-violet-900 bg-violet-50 border border-violet-200 rounded px-2 py-1.5 mb-2">
+          ❓ {lang === "uk" ? "Питання до команди" : "Question for the team"}: {reply.team_question}
+        </p>
+      )}
       <p className="text-stone-700 text-sm mb-1">{reply.draft_text}</p>
       {reply.attachments && reply.attachments.length > 0 && (
         <p className="text-[12px] text-stone-500 mb-1">
@@ -78,6 +94,24 @@ export default function PendingReplyCard({
 
       {status === "awaiting_approval" ? (
         <>
+          {reply.team_question && (
+            <div className="mb-3">
+              <textarea
+                value={answer}
+                onChange={(e) => setAnswer(e.target.value)}
+                rows={3}
+                placeholder={lang === "uk" ? "Ваша відповідь клієнту — піде як є…" : "Your answer to the client — sent as written…"}
+                className="w-full border border-amber-200 rounded px-2 py-1.5 text-sm bg-white"
+              />
+              <button
+                onClick={sendAnswer}
+                disabled={pending || !answer.trim()}
+                className="mt-1 text-[12px] px-2.5 py-1 rounded bg-violet-700 text-white hover:bg-violet-800 disabled:opacity-50"
+              >
+                {lang === "uk" ? "Надіслати мою відповідь" : "Send my answer"}
+              </button>
+            </div>
+          )}
           <p className="text-[11px] text-stone-400 mb-2">{t.pendingReplyNote}</p>
           <div className="flex gap-2">
             <button

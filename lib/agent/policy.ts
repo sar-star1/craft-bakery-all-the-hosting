@@ -12,6 +12,12 @@ export interface TurnFlags {
   orderPlaced?: boolean;
   orderAmended?: boolean;
   toolsUsed?: string[];
+  // What the agent wants the team to answer (request_human_review's `question`).
+  teamQuestion?: string;
+  // Set by review_order while delivery is still paid: how much is missing for free delivery,
+  // and whether the client already added things after being told.
+  freeDeliveryShortfall?: number;
+  stillShortAfterAdding?: boolean;
 }
 
 export type ReplyDecision = { mode: "send" } | { mode: "gate"; reason: string };

@@ -37,3 +37,36 @@ export function fallbackReaction(clientText: string): string | null {
   if (/^(?:ок|окей|ok|okay|добре|гаразд|так|ага|угу|домовились|чудово|супер|класно|підходить|буду чекати)$/.test(t)) return "👍";
   return null;
 }
+
+// The reply promises to find something out or pass it on ("уточню в команди", "перевірю",
+// "передам менеджеру"). Such a promise is only honest if a person is actually asked.
+export function promisesFollowUp(text: string): boolean {
+  return /(?:^|[^\p{L}])(?:уточню|уточнимо|уточнюю|уточнюємо|з['’ʼ]ясую|з['’ʼ]ясуємо|з['’ʼ]ясовую|дізнаюсь|дізнаюся|дізнаємось|дізнаємося|перевірю|перевіримо|перевіряю|передам\s+(?:це\s+|питання\s+)?(?:команді|менеджеру|адмін|керівнику|власнику|колегам)|передамо\s+(?:це\s+|питання\s+)?(?:команді|менеджеру|адмін|керівнику|власнику|колегам)|зв['’ʼ]яжусь|зв['’ʼ]яжемося|зв['’ʼ]яжемось|повернуся\s+(?:до\s+вас\s+)?з\s+відповід|повернемося\s+(?:до\s+вас\s+)?з\s+відповід)(?![\p{L}])/iu.test(
+    text
+  );
+}
+
+// What is wrong with a finished reply, if anything — returned as an instruction to the
+// model, which gets one chance to write it again before the reply goes anywhere.
+export function replyProblem(
+  text: string,
+  flags: {
+    humanReviewReasons: string[];
+    orderPlaced?: boolean;
+    orderAmended?: boolean;
+    summaryShown?: boolean;
+    freeDeliveryShortfall?: number;
+    stillShortAfterAdding?: boolean;
+  }
+): string | null {
+  if (promisesFollowUp(text) && flags.humanReviewReasons.length === 0 && !flags.orderPlaced && !flags.orderAmended) {
+    return "Ти пообіцяв клієнту щось уточнити, перевірити або передати команді, але не викликав request_human_review — тож нікого насправді не попросили. Якщо відповіді справді немає в даних інструментів: виклич request_human_review (reason і question — що саме команда має з'ясувати) і напиши клієнту коротку тепло-чесну відповідь, що уточнюєш і повернешся, без вигаданих строків. Якщо відповідь у тебе є — перепиши без обіцянки уточнити.";
+  }
+  const short = flags.freeDeliveryShortfall;
+  if (short && flags.summaryShown && !new RegExp(`(?<![\\d])${short}(?![\\d])`).test(text.replace(/[\s ]/g, ""))) {
+    return flags.stillShortAfterAdding
+      ? `Клієнт уже отримав підказку добрати до безкоштовної доставки й щось додав, але все ще бракує ${short} ₴, а у відповіді цього немає. Перепиши: тепло й по-людськи визнай, що додане ще не дотягує, і скажи точно, скільки лишилось (${short} ₴); запропонуй, що можна додати, без тиску. Решту (підсумок) збережи.`
+      : `У підсумку доставка платна, а у відповіді не сказано, скільки бракує до безкоштовної: ${short} ₴. Перепиши, додавши це одним теплим реченням і, за бажанням, ідею, що додати. Решту збережи.`;
+  }
+  return null;
+}

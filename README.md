@@ -102,6 +102,26 @@ The group is actionable, so day-to-day approvals don't need the dashboard:
 Re-register the webhook after upgrading (`scripts/telegram-setup.mjs webhook …`)
 so Telegram also delivers button presses.
 
+## Taking over a conversation, and fixing what was sent
+
+- **Перебрати розмову** (client page, or 🙋 on any draft alert in the group) pauses the
+  agent for that client. While paused the agent still stores what the client writes
+  but never answers; each message is relayed to the staff group with a **🤖 Повернути агенту**
+  button, and *replying to that message in the group* sends your reply to the client.
+- The client page has a composer ("Написати клієнту від імені команди"); sending from it
+  pauses the agent too. What the team writes is saved as a style example.
+- **Edit / delete a sent message** (✏️ / 🗑 under each outgoing message on the client page)
+  changes it in the client's Telegram chat (edits show as "edited"; Telegram lets bots delete
+  for 48 h). The agent's history uses the corrected text, and the correction becomes a style example.
+- **Real "I'll check with the team".** The agent may only say it will clarify something after
+  calling `request_human_review` with a `question`. If it promises without asking, the reply is
+  sent back to the model once; if it still does, the code raises the question itself. The group
+  alert shows **❓ Питання до команди**; reply with plain text and the agent writes the client's
+  answer from yours (and saves it as a fact if it is general), or `!text` to send your own wording.
+  Unanswered after 15 min → one nudge in the group.
+- **Free delivery.** After every change `review_order` reports what is missing; the reply must
+  name the number, and if the client was already told and added too little, the agent says so.
+
 ## Teaching the agent
 
 Everything below applies to every reply and campaign draft, from the dashboard

@@ -101,6 +101,8 @@ export interface Client {
   delivery_address: string | null;
   payment_method: "cash" | "cashless" | null;
   phone: string | null;
+  // The team has taken over the conversation: the agent logs messages but stays silent.
+  agent_paused?: boolean;
   created_at: string;
 }
 
@@ -155,6 +157,7 @@ export interface PendingReply {
   reply_type: PendingReplyType;
   status: PendingReplyStatus;
   attachments?: Attachment[];
+  team_question?: string | null;
   created_at: string;
 }
 
@@ -224,5 +227,8 @@ export interface Message {
   direction: "in" | "out";
   text: string;
   telegram_message_id: number | null;
+  sent_by?: "agent" | "team" | null;
+  edited_at?: string | null;
+  deleted_at?: string | null;
   created_at: string;
 }
