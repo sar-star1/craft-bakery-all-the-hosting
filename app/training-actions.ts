@@ -7,6 +7,10 @@ import { getExamples, recordExample } from "@/lib/agent/memory";
 import { buildSystemPrompt } from "@/lib/agent/prompt";
 import { reviseDraft } from "@/lib/agent/revise";
 import { runAgentLoop } from "@/lib/agent/run";
+import { orderStateBlock, type LastOrderInfo, type OrderStateInput } from "@/lib/agent/orderState";
+import { isSummarized, missingFields, type OrderDraft } from "@/lib/chatOrders";
+import { classifySummaryReply, draftText } from "@/lib/orderApproval";
+import { priceOrderLines } from "@/lib/orders";
 import type { TurnFlags } from "@/lib/agent/policy";
 import { requireAdmin } from "@/lib/auth";
 import { PAYMENT_LABEL } from "@/lib/orderRules";
@@ -40,6 +44,37 @@ export async function practiceReply(
       : undefined;
     const { practice_repeat: _flag, ...memory } = state;
     void _flag;
+    const practiceState: Record<string, unknown> = { ...state, ...(profile ? { profile } : {}) };
+    const clientTurns = history.filter((t) => t.role === "client").length;
+
+    // Same rule as in real chats: a complete summary was waiting, and this message approves it
+    // in any way (or just moves on) — the order is "placed" before the agent answers.
+    let justPlaced: OrderStateInput["justPlaced"] = null;
+    let changing = false;
+    const waiting = practiceState.draft_order as OrderDraft | undefined;
+    if (waiting && isSummarized(waiting) && missingFields(waiting).length === 0 && clientTurns > (waiting.summary_at_inbound ?? Infinity)) {
+      const { verdict } = await classifySummaryReply(history.at(-1)?.text ?? "", draftText(waiting));
+      if (verdict === "change") changing = true;
+      else {
+        const priced = await priceOrderLines(db, waiting.lines.map((l) => ({ item_id: l.item_id, qty: l.qty })));
+        if (priced.ok) {
+          const summary = priced.lines.map((l) => `${l.name} ×${l.qty}`).join(", ");
+          delete practiceState.draft_order;
+          practiceState.last_order = { summary, total: priced.grand_total, created_at: new Date().toISOString(), status: "new" } satisfies LastOrderInfo;
+          practiceState.last_order_turn = history.length - 1;
+          flags.orderPlaced = true;
+          flags.placedBySystem = true;
+          justPlaced = { summary, total: priced.grand_total, mode: verdict === "ack" ? "ack" : "more" };
+        }
+      }
+    }
+    const draftNow = practiceState.draft_order as OrderDraft | undefined;
+    const orderState = orderStateBlock({
+      draft: draftNow ? { ...draftNow, missing: missingFields(draftNow), summary_sent_at: draftNow.summary_at_inbound !== undefined ? "practice" : undefined } : null,
+      lastOrder: (practiceState.last_order as LastOrderInfo | undefined) ?? null,
+      justPlaced,
+      changing,
+    });
     const system = buildSystemPrompt({
       client: { ...client, pipeline_stage: repeat ? ("recurring" as never) : client.pipeline_stage, contact_name: null, standing_order_notes: null, blocker_note: null, lead_temperature: null },
       capturedFields: memory,
@@ -49,13 +84,16 @@ export async function practiceReply(
       profile: profile
         ? { venue_name: profile.venue_name, fop: profile.fop, address: profile.delivery_address, payment: PAYMENT_LABEL[profile.payment_method] }
         : undefined,
+      orderState,
     });
-    const messages = history.map((t) => ({
+    // After an order, the earlier conversation is closed — only what follows is shown (as in real chats).
+    const lastOrderTurn = typeof practiceState.last_order_turn === "number" ? practiceState.last_order_turn : null;
+    const from = justPlaced ? history.length - 1 : lastOrderTurn !== null ? lastOrderTurn + 1 : 0;
+    const messages = history.slice(from).map((t) => ({
       role: t.role === "client" ? ("user" as const) : ("assistant" as const),
       content: t.text,
     }));
     while (messages.length > 0 && messages[0].role !== "user") messages.shift();
-    const practiceState: Record<string, unknown> = { ...state, ...(profile ? { profile } : {}) };
     const text = await runAgentLoop(system, messages, {
       supabase: db,
       client,
@@ -68,6 +106,7 @@ export async function practiceReply(
     if (!text) return { ok: false, error: flags.humanReviewReasons.join("; ") || "Агент не дав відповіді." };
     const notes = [
       ...flags.humanReviewReasons.map((r) => `Передав би людині: ${r}`),
+      ...(justPlaced ? [`Оформив би замовлення: клієнт підтвердив ${justPlaced.mode === "ack" ? "підсумок" : "підсумок і написав ще щось"} — без жодного перепитування`] : []),
       ...(flags.reaction ? [`Поставив би реакцію ${flags.reaction} на повідомлення клієнта`] : []),
       ...(flags.massOrderFlagged ? ["Позначив би як масове замовлення"] : []),
       ...(flags.confirmationProposed ? ["Запропонував домовленість — чекала б на підтвердження"] : []),

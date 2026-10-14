@@ -333,6 +333,8 @@ export async function runOrderTool(name: string, args: Record<string, unknown>, 
 
     case "place_order": {
       const NOT_ACCEPTED = " Do NOT tell the client the order is accepted — it is not in the system.";
+      // The system already placed it this turn (the client's message was the approval).
+      if (ctx.flags.placedBySystem) return "The order is already in the system — it was placed automatically when the client approved. Tell the client it is accepted and that a manager will confirm the details and date. Do not call place_order again.";
       if (args.client_confirmed !== true) return `Not placed: the client has not approved the summary.${NOT_ACCEPTED}`;
       const approval: Approval = args.approval === "continued" ? "continued" : "text";
       const draft = await loadDraft(ctx);

@@ -20,7 +20,7 @@ export const DEFAULT_ORDERING_RULES: OrderingRules = {
   min_order_total: 1000,
   free_delivery_from: 2000,
   delivery_fee: 250,
-  auto_confirm_minutes: 30,
+  auto_confirm_minutes: 120,
 };
 
 // Kept for existing imports.

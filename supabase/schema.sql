@@ -261,7 +261,7 @@ on conflict (id) do nothing;
 -- Ordering numbers the team edits in Settings: smallest order, free-delivery
 -- threshold and the fee below it (all UAH).
 insert into site_content (key, content_json) values
-  ('ordering_rules', '{"min_order_total": 1000, "free_delivery_from": 2000, "delivery_fee": 250, "auto_confirm_minutes": 30}'::jsonb),
+  ('ordering_rules', '{"min_order_total": 1000, "free_delivery_from": 2000, "delivery_fee": 250, "auto_confirm_minutes": 120}'::jsonb),
   ('telegram_routing', '{}'::jsonb)   -- where staff alerts go: orders topic/chat (Settings)
 on conflict (key) do nothing;
 

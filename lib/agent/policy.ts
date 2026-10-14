@@ -10,6 +10,8 @@ export interface TurnFlags {
   // The reply carries a priced order summary (its Telegram message is what a 👍 approves).
   summaryShown?: boolean;
   orderPlaced?: boolean;
+  // The order was placed by the system itself, from the client's approving message, before the agent ran.
+  placedBySystem?: boolean;
   orderAmended?: boolean;
   toolsUsed?: string[];
   // What the agent wants the team to answer (request_human_review's `question`).

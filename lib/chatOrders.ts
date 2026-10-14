@@ -239,9 +239,22 @@ export async function handleReactionApproval(
     .eq("client_id", client.id)
     .order("last_message_at", { ascending: false })
     .limit(3);
+  // A 👍 on the summary itself approves it — and so does a positive reaction on any of OUR
+  // messages sent after the summary (e.g. the client likes "Чи все вірно?" instead of the summary).
+  const { data: reacted } = await db
+    .from("messages")
+    .select("created_at")
+    .eq("client_id", client.id)
+    .eq("direction", "out")
+    .eq("telegram_message_id", input.messageId)
+    .limit(1)
+    .maybeSingle();
   for (const c of convos ?? []) {
     const draft = (c.captured_fields as Record<string, unknown> | null)?.draft_order as OrderDraft | undefined;
-    if (!draft || draft.summary_message_id !== input.messageId) continue;
+    if (!draft || !isSummarized(draft) || missingFields(draft).length > 0) continue;
+    const onSummary = draft.summary_message_id === input.messageId;
+    const afterSummary = Boolean(reacted && draft.summary_sent_at && Date.parse(reacted.created_at as string) >= Date.parse(draft.summary_sent_at) - 2000);
+    if (!onSummary && !afterSummary) continue;
     const placed = await placeChatOrder(db, {
       client: { id: client.id as string, business_name: client.business_name as string },
       conversationId: c.id as string,
@@ -251,7 +264,7 @@ export async function handleReactionApproval(
     await logAgentEvent(db, client.id as string, "reaction_approval", { emojis: input.emojis, placed: placed.ok, reason: placed.ok ? null : placed.reason });
     if (placed.ok) {
       const sent = await sendTelegramMessage(input.chatId, ACK_TEXT);
-      if (sent.ok) await db.from("messages").insert({ client_id: client.id, conversation_id: c.id, direction: "out", text: ACK_TEXT, telegram_message_id: sent.messageId ?? null });
+      if (sent.ok) await db.from("messages").insert({ client_id: client.id, conversation_id: c.id, direction: "out", text: ACK_TEXT, telegram_message_id: sent.messageId ?? null, sent_by: "agent" });
     }
     return placed.ok;
   }

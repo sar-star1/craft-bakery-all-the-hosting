@@ -145,17 +145,30 @@ drafts). When it does so is a team rule — edit it in Settings.
 
 ## When an order counts
 
-A chat order enters the Замовлення board when the client approves the summary:
-in words, with a positive reaction on the summary message, by moving on to
-something else without objecting, or by saying nothing for `auto_confirm_minutes`
-(Settings; Telegram doesn't tell bots whether a message was read). Silence is
-checked on every incoming update, every dashboard visit and the daily cron — on a
-free Vercel plan there is no faster timer. After approval the next message is a
-**new** order unless the client explicitly asks to change the previous one
-(`amend_last_order`, only while the team hasn't confirmed it). "Прийнято ✅" must be
-backed by a placed order: otherwise it is placed automatically or the reply is held.
-Reactions on the summary need `message_reaction` in the webhook's allowed updates —
-press "Зареєструвати вебхук" in Settings once after upgrading.
+A chat order enters the Замовлення board when the client approves the summary, and
+**the system recognises approval, not the model** (`lib/orderApproval.ts`): once a complete
+summary has been delivered, the client's next message approves it unless it changes or objects.
+Thanks, "ок", "так", "супер", "без проблем", a 👍 — anything approving or neutral, or simply
+moving on to another topic — places the order *before* the agent answers. Obvious
+acknowledgements are recognised by a word list (no model call); everything else is classified by
+the model as ACK / MORE (approval + something new) / CHANGE, and if the model is unavailable only
+clear change words or a question count as "change". A positive reaction on the summary — or on any
+message of ours sent after it — approves too. If the client says nothing, the order is placed
+after `auto_confirm_minutes` (default **120**, Settings; Telegram doesn't tell bots whether a
+message was read). Silence is checked on every incoming update, every dashboard visit and the
+daily cron; for an on-time check point a free external pinger (cron-job.org, every 10–15 min) at
+`/api/cron/sweep` with the header `Authorization: Bearer <CRON_SECRET>`.
+
+After that the order is **closed**: every turn the agent gets a system record (`СТАН ЗАМОВЛЕННЯ`:
+draft, last order and its status) and the chat history before the last order is not shown to it, so
+it can't keep asking about an order that already happened. The client's next message is a new order
+— unless, in any wording, they ask to add to or change what they just ordered: then the agent edits
+that order (`amend_last_order`, only while the team hasn't confirmed it), the staff group gets an
+"AMENDED" alert, and a reply claiming a change that wasn't made is held. "Прийнято ✅" must be backed
+by a placed order: otherwise it is placed automatically or the reply is held. The practice chat
+(Тренування) follows the same rules.
+Reactions need `message_reaction` in the webhook's allowed updates — press "Зареєструвати
+вебхук" in Settings once after upgrading.
 
 **Staff group**: Settings can split alerts into two Topics (📦 orders / 💬 messages)
 or send orders to a separate chat. `npm test` runs the suites in `tests/`.

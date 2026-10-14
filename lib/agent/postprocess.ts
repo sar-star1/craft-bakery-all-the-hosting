@@ -27,6 +27,11 @@ export function claimsOrderAccepted(text: string): boolean {
   );
 }
 
+// The reply says the (already placed) order was changed or added to.
+export function claimsOrderChanged(text: string): boolean {
+  return /(?:додали|додав|додала|змінили|змінив|змінила|оновили|оновив|оновила|внесли|вніс|дописали|дописав)[^.!?\n]{0,70}замовленн|замовлення\s+(?:оновлено|змінено|доповнено)/iu.test(text);
+}
+
 // Reactions that need no judgment: a bare thank-you or a bare "ok". The model is
 // supposed to choose these itself (react_to_message) but often writes the emoji
 // into the text instead, so a plain message gets its reaction from here.
@@ -57,8 +62,12 @@ export function replyProblem(
     summaryShown?: boolean;
     freeDeliveryShortfall?: number;
     stillShortAfterAdding?: boolean;
+    toolsUsed?: string[];
   }
 ): string | null {
+  if (claimsOrderChanged(text) && !flags.orderAmended && !flags.orderPlaced && !(flags.toolsUsed ?? []).includes("update_order_draft")) {
+    return "Ти пишеш, що додав чи змінив замовлення, але amend_last_order не викликано — у системі нічого не змінилось. Якщо клієнт просить доповнити або змінити вже ОФОРМЛЕНЕ замовлення — виклич amend_last_order і лише тоді скажи, що змінено (з новою сумою з результату). Якщо це нове замовлення — працюй через update_order_draft і не кажи, що змінив оформлене.";
+  }
   if (promisesFollowUp(text) && flags.humanReviewReasons.length === 0 && !flags.orderPlaced && !flags.orderAmended) {
     return "Ти пообіцяв клієнту щось уточнити, перевірити або передати команді, але не викликав request_human_review — тож нікого насправді не попросили. Якщо відповіді справді немає в даних інструментів: виклич request_human_review (reason і question — що саме команда має з'ясувати) і напиши клієнту коротку тепло-чесну відповідь, що уточнюєш і повернешся, без вигаданих строків. Якщо відповідь у тебе є — перепиши без обіцянки уточнити.";
   }
