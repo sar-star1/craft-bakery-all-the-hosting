@@ -21,6 +21,8 @@ export interface DraftAlert {
   text: string;
   clientMessage?: string;
   reason?: string;
+  // What the agent needs the team to answer (set when it asked for help).
+  question?: string;
   note?: string; // appended line, e.g. who revised it
   attachments?: { name: string }[];
 }
@@ -33,15 +35,19 @@ export function buildDraftAlert(draft: DraftAlert): { text: string; buttons: Inl
       { text: "🚫 Відхилити", callback_data: `rj:${draft.id}` },
     ],
   ];
+  buttons.push([{ text: "🙋 Перебрати розмову", callback_data: `tk:${draft.clientId}` }]);
   if (base) buttons.push([{ text: "Відкрити в дашборді", url: `${base}/clients/${draft.clientId}` }]);
 
   const lines = [
     `${REPLY_TYPE_LABEL[draft.replyType] ?? "Чернетка"} · ${draft.clientName}${draft.reason ? ` (${draft.reason})` : ""}`,
+    draft.question ? `\n❓ Питання до команди: ${draft.question.slice(0, 600)}` : "",
     draft.clientMessage ? `\nКлієнт: «${draft.clientMessage.slice(0, 600)}»` : "",
     `\nЧернетка:\n«${draft.text.slice(0, 1500)}»`,
     draft.attachments?.length ? `\n📎 Файли: ${draft.attachments.map((a) => a.name).join(", ")}` : "",
     draft.note ? `\n${draft.note}` : "",
-    "\n✏️ Відповідь на це повідомлення: звичайний текст — зауваження агенту (перепише чернетку й, якщо зауваження загальне, запам'ятає правило); текст, що починається з «!», піде клієнту як є.",
+    draft.question
+      ? "\n✏️ Дайте відповідь на це повідомлення: звичайним текстом — агент сам складе відповідь клієнту з ваших слів (і запам'ятає її як факт, якщо вона загальна); текст з «!» піде клієнту як є."
+      : "\n✏️ Відповідь на це повідомлення: звичайний текст — зауваження агенту (перепише чернетку й, якщо зауваження загальне, запам'ятає правило); текст, що починається з «!», піде клієнту як є.",
   ];
   return { text: lines.filter(Boolean).join("\n"), buttons };
 }

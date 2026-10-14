@@ -7,6 +7,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/auth";
 import { markClientOrdered } from "@/lib/orders";
 import { rejectPendingReply as rejectReply, sendPendingReply } from "@/lib/replies";
+import { deleteMessage, editMessage, sendAsTeam, setAgentPaused } from "@/lib/takeover";
 import { getBotDeepLink } from "@/lib/telegram";
 import {
   type Attachment,
@@ -111,6 +112,14 @@ export interface PendingReplyActionState {
 export async function approvePendingReply(id: string): Promise<PendingReplyActionState> {
   await requireAdmin();
   const result = await sendPendingReply(id);
+  return result.ok ? {} : { error: result.error };
+}
+
+// The team answers a held reply with its own wording instead of the agent's draft.
+export async function answerPendingReply(id: string, text: string): Promise<PendingReplyActionState> {
+  await requireAdmin();
+  if (!text.trim()) return { error: "Empty message." };
+  const result = await sendPendingReply(id, { text });
   return result.ok ? {} : { error: result.error };
 }
 
@@ -420,4 +429,34 @@ export async function startSeasonalOffer(
   });
   revalidatePath("/pending-replies");
   return { message: "started" };
+}
+
+// ---- taking over a conversation --------------------------------------------
+
+export interface TakeoverActionResult {
+  error?: string;
+}
+
+const asResult = (r: { ok: true } | { ok: false; error: string }): TakeoverActionResult => (r.ok ? {} : { error: r.error });
+
+export async function setClientAgentPaused(clientId: string, paused: boolean): Promise<TakeoverActionResult> {
+  await requireAdmin();
+  const r = asResult(await setAgentPaused(createSupabaseServerClient(), clientId, paused));
+  revalidatePath("/clients");
+  return r;
+}
+
+export async function sendTeamMessage(clientId: string, text: string): Promise<TakeoverActionResult> {
+  await requireAdmin();
+  return asResult(await sendAsTeam(createSupabaseServerClient(), clientId, text));
+}
+
+export async function editSentClientMessage(messageId: string, text: string): Promise<TakeoverActionResult> {
+  await requireAdmin();
+  return asResult(await editMessage(createSupabaseServerClient(), messageId, text));
+}
+
+export async function deleteSentClientMessage(messageId: string): Promise<TakeoverActionResult> {
+  await requireAdmin();
+  return asResult(await deleteMessage(createSupabaseServerClient(), messageId));
 }

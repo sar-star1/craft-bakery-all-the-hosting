@@ -73,6 +73,7 @@ export async function sendPendingReply(id: string, opts?: { text?: string }): Pr
     direction: "out",
     text,
     telegram_message_id: sent.messageId ?? null,
+    sent_by: opts?.text ? "team" : "agent",
     // Stamped when the reply was written, not when it was approved, so the conversation
     // keeps reading in the order things were said even if the client wrote again meanwhile.
     created_at: reply.created_at ?? undefined,

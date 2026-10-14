@@ -15,6 +15,9 @@ import {
   saveDraftFor,
   sweepPendingOrders,
 } from "@/lib/chatOrders";
+import { relayToTeam } from "@/lib/takeover";
+import { approveSummaryByMessage } from "@/lib/orderApproval";
+import { buildOrderState, lastChatOrderAt, type OrderStateInput } from "./orderState";
 import { notifyAdmin, sendTelegramMessage, sendTypingAction, setMessageReaction, startPayloadToClientId } from "@/lib/telegram";
 import type { ClientSource, PipelineStage } from "@/lib/types";
 import { AGENT_MODEL, getAnthropic, isAnthropicConfigured } from "./anthropic";
@@ -23,7 +26,7 @@ import { withClientLock } from "./lock";
 import { getActiveGuidelines } from "./guidelines";
 import { PAYMENT_LABEL } from "@/lib/orderRules";
 import { getExamples } from "./memory";
-import { claimsOrderAccepted, fallbackReaction, sanitizeReply } from "./postprocess";
+import { claimsOrderAccepted, claimsOrderChanged, fallbackReaction, promisesFollowUp, replyProblem, sanitizeReply } from "./postprocess";
 import { decideOrderFlowReply, type TurnFlags } from "./policy";
 import { buildSystemPrompt } from "./prompt";
 import { AGENT_TOOLS, runTool, type ToolContext } from "./tools";
@@ -68,10 +71,11 @@ interface ClientRow {
   fop: string | null;
   delivery_address: string | null;
   payment_method: "cash" | "cashless" | null;
+  agent_paused: boolean | null;
 }
 
 const CLIENT_COLUMNS =
-  "id, business_name, contact_name, telegram_chat_id, status, pipeline_stage, standing_order_notes, blocker_note, lead_temperature, fop, delivery_address, payment_method";
+  "id, business_name, contact_name, telegram_chat_id, status, pipeline_stage, standing_order_notes, blocker_note, lead_temperature, fop, delivery_address, payment_method, agent_paused";
 const MAX_TOOL_ITERATIONS = 8;
 const HISTORY_LIMIT = 30;
 
@@ -171,6 +175,7 @@ async function logOutgoing(db: Db, clientId: string, conversationId: string | nu
     direction: "out",
     text,
     telegram_message_id: messageId ?? null,
+    sent_by: "agent",
   });
 }
 
@@ -218,8 +223,8 @@ async function handleStart(msg: TelegramMessage, payload: string) {
 
   const who = client.contact_name ? `, ${client.contact_name}` : "";
   const greeting = isNew
-    ? `Вітаю${who}! Це асистент Peremoga Bakery. Розкажіть, будь ласка, про ваш заклад: як він називається і що плануєте замовляти?`
-    : `Вітаю${who}! Це асистент Peremoga Bakery. Пишіть сюди щодо замовлень — допоможу з меню, цінами та доставкою.`;
+    ? `Вітаю${who}! Це асистент Peremoga Bakery — дуже приємно познайомитися. Розкажіть, будь ласка, про ваш заклад: як він називається і що плануєте замовляти? З радістю допоможемо з меню, цінами та доставкою.`
+    : `Вітаю${who}! Це асистент Peremoga Bakery, раді вас бачити. Пишіть сюди щодо замовлень — допоможемо з меню, цінами та доставкою.`;
   const sent = await sendTelegramMessage(chatId, greeting);
   if (sent.ok) await logOutgoing(db, client.id, null, greeting, sent.messageId);
 }
@@ -301,6 +306,13 @@ async function respondToMessage(db: Db, msg: TelegramMessage, text: string, chat
   const clientRow = freshClient as ClientRow;
   const conversation = await getOrCreateConversation(db, clientRow.id);
 
+  // The team has taken over this client: nothing is answered here, the message is passed to the group.
+  if (clientRow.agent_paused) {
+    await relayToTeam(db, { clientId: clientRow.id, clientName: clientRow.business_name, text });
+    await logAgentEvent(db, clientRow.id, "paused_skip", { text: text.slice(0, 200) });
+    return;
+  }
+
   if (!isAnthropicConfigured()) {
     await notifyAdmin(
       `Повідомлення від ${clientRow.business_name}: «${text.slice(0, 300)}»\n(AI-агент не налаштовано — ANTHROPIC_API_KEY відсутній, відповідь не надіслано.)${dashboardLink(`/clients/${clientRow.id}`)}`
@@ -329,7 +341,42 @@ async function respondToMessage(db: Db, msg: TelegramMessage, text: string, chat
     inboundCount: inboundCount ?? 1,
   };
 
-  const rawReply = await runAgent(db, ctx, clientRow, conversation.captured_fields, { telegramMessageId: msg.message_id, text });
+  // A complete summary is waiting for the client's answer. Whatever this message is — thanks, "ok",
+  // a thumbs-up, "good", or simply moving on to something else — it approves the order, and the
+  // order is placed here, BEFORE the agent answers. Only a message that changes the summary or
+  // objects to it is left to the agent.
+  let justPlaced: OrderStateInput["justPlaced"] = null;
+  let changing = false;
+  try {
+    const approval = await approveSummaryByMessage(db, {
+      client: { id: clientRow.id, business_name: clientRow.business_name },
+      conversationId: conversation.id,
+      text,
+      inboundCount: ctx.inboundCount,
+    });
+    if (approval?.verdict === "change") changing = true;
+    if (approval?.placed) {
+      flags.orderPlaced = true;
+      flags.placedBySystem = true;
+      const { data: placedOrder } = await db
+        .from("orders")
+        .select("item_summary_uk, total_amount")
+        .eq("client_id", clientRow.id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      justPlaced = {
+        summary: String(placedOrder?.item_summary_uk ?? ""),
+        total: placedOrder?.total_amount ? Number(placedOrder.total_amount) : undefined,
+        mode: approval.verdict === "ack" ? "ack" : "more",
+      };
+    }
+  } catch (err) {
+    // never let the approval step block the reply: the agent and the safety net still run
+    console.error("approval step failed", err);
+  }
+
+  const rawReply = await runAgent(db, ctx, clientRow, conversation.captured_fields, { telegramMessageId: msg.message_id, text }, { justPlaced, changing });
 
   if (!rawReply) {
     await notifyAdmin(
@@ -368,11 +415,31 @@ async function respondToMessage(db: Db, msg: TelegramMessage, text: string, chat
     }
   }
 
+  // "Додали до замовлення" must mean the order really was changed.
+  if (claimsOrderChanged(reply) && !flags.orderAmended && !flags.orderPlaced && !(flags.toolsUsed ?? []).includes("update_order_draft")) {
+    flags.humanReviewReasons.push("агент написав, що змінив замовлення, але в системі зміни немає");
+    await logAgentEvent(db, clientRow.id, "safety_net", { action: "held_unbacked_change" });
+  }
+
+  // Still promising to "clarify" without having asked anyone (the model was already told once):
+  // ask for real, so the promise is never empty.
+  if (promisesFollowUp(reply) && flags.humanReviewReasons.length === 0 && !flags.orderPlaced && !flags.orderAmended) {
+    flags.humanReviewReasons.push("агент пообіцяв клієнту уточнити, тож питання передано команді");
+    flags.teamQuestion = `Клієнт написав: «${text.slice(0, 300)}». Агент пообіцяв уточнити — потрібна відповідь команди.`;
+    await logAgentEvent(db, clientRow.id, "safety_net", { action: "promise_without_flag" });
+  }
+
   const { count: openFlags } = await db
     .from("mass_order_flags")
     .select("id", { count: "exact", head: true })
     .eq("client_id", clientRow.id)
     .eq("resolved", false);
+
+  // An order was just placed: the client is no longer a lead, so the confirmation is routine.
+  if (flags.orderPlaced) {
+    const { data: fresh } = await db.from("clients").select("pipeline_stage").eq("id", clientRow.id).maybeSingle();
+    if (fresh?.pipeline_stage) ctx.client.pipeline_stage = fresh.pipeline_stage as PipelineStage;
+  }
 
   const decision = decideOrderFlowReply({
     flags,
@@ -391,11 +458,13 @@ async function respondToMessage(db: Db, msg: TelegramMessage, text: string, chat
         reaction: flags.reaction ?? null,
         reaction_message_id: flags.reaction ? msg.message_id : null,
         shows_summary: Boolean(flags.summaryShown),
+        team_question: flags.humanReviewReasons.length > 0 ? flags.teamQuestion ?? flags.humanReviewReasons.join("; ") : null,
       })
       .select("id")
       .single();
     if (draft) {
       await announceDraft(db, {
+        question: flags.humanReviewReasons.length > 0 ? flags.teamQuestion ?? flags.humanReviewReasons.join("; ") : undefined,
         id: draft.id as string,
         clientId: clientRow.id,
         clientName: clientRow.business_name,
@@ -441,22 +510,36 @@ async function runAgent(
   ctx: ToolContext,
   client: ClientRow,
   capturedFields: Record<string, unknown>,
-  current: { telegramMessageId: number; text: string }
+  current: { telegramMessageId: number; text: string },
+  state: { justPlaced: OrderStateInput["justPlaced"]; changing: boolean }
 ): Promise<string | null> {
-  const { data: rows } = await db
-    .from("messages")
-    .select("direction, text, created_at, telegram_message_id")
-    .eq("client_id", client.id)
-    .order("created_at", { ascending: false })
-    .limit(HISTORY_LIMIT);
+  const [{ data: rows }, orderCutoff] = await Promise.all([
+    db
+      .from("messages")
+      .select("direction, text, created_at, telegram_message_id, deleted_at")
+      .eq("client_id", client.id)
+      .order("created_at", { ascending: false })
+      .limit(HISTORY_LIMIT),
+    lastChatOrderAt(db, client.id),
+  ]);
 
+  // Everything said before the last order from this chat belongs to a conversation that is
+  // finished (its summary, the confirmation, the back-and-forth). Showing it to the model is what
+  // made it ask again about orders that were already placed — the order state below replaces it.
+  // The message being answered is always kept.
+  const visible = ((rows ?? []) as (HistoryRow & { deleted_at?: string | null })[]).filter(
+    (r) =>
+      !r.deleted_at &&
+      (!orderCutoff || r.telegram_message_id === current.telegramMessageId || Date.parse(r.created_at) >= Date.parse(orderCutoff))
+  );
   // The message being answered goes last, whatever order the replies were stored in.
-  const messages: Anthropic.MessageParam[] = buildHistory((rows ?? []) as HistoryRow[], current);
+  const messages: Anthropic.MessageParam[] = buildHistory(visible, current);
 
-  const [guidelines, examples, { count: ordersCount }] = await Promise.all([
+  const [guidelines, examples, { count: ordersCount }, orderState] = await Promise.all([
     getActiveGuidelines(db),
     getExamples(db),
     db.from("orders").select("id", { count: "exact", head: true }).eq("client_id", client.id),
+    buildOrderState(db, { clientId: client.id, conversationId: ctx.conversationId, justPlaced: state.justPlaced, changing: state.changing }),
   ]);
   const system = buildSystemPrompt({
     client,
@@ -470,6 +553,7 @@ async function runAgent(
       address: client.delivery_address ?? undefined,
       payment: client.payment_method ? PAYMENT_LABEL[client.payment_method] : undefined,
     },
+    orderState,
   });
   return runAgentLoop(system, messages, ctx);
 }
@@ -482,6 +566,7 @@ export async function runAgentLoop(
   ctx: ToolContext
 ): Promise<string | null> {
   const anthropic = getAnthropic();
+  let corrected = false;
 
   for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
     const response = await anthropic.messages.create({
@@ -506,6 +591,14 @@ export async function runAgentLoop(
         .flatMap((b) => (b.type === "text" ? [b.text] : []))
         .join("\n")
         .trim();
+      // The reply is checked once; if it breaks a rule the model gets one chance to fix it.
+      const problem = text && !corrected ? replyProblem(text, ctx.flags) : null;
+      if (problem) {
+        corrected = true;
+        messages.push({ role: "assistant", content: response.content });
+        messages.push({ role: "user", content: problem });
+        continue;
+      }
       return text || null;
     }
 

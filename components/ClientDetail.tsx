@@ -16,6 +16,7 @@ import { PIPELINE_STAGES, type AgentEvent, type Client, type Conversation, type 
 import { formatDateTime, formatMoney } from "@/lib/utils";
 import Sidebar from "./Sidebar";
 import LangToggle from "./LangToggle";
+import MessageThread from "./MessageThread";
 import PendingReplyCard from "./PendingReplyCard";
 
 export default function ClientDetail({
@@ -174,26 +175,7 @@ export default function ClientDetail({
 
         <section className="mb-8">
           <h2 className="font-serif text-lg mb-3">{t.clientMessages}</h2>
-          {messages.length === 0 ? (
-            <p className="text-stone-400 text-sm">{t.clientNoMessages}</p>
-          ) : (
-            <div className="bg-white rounded-md border border-stone-200 p-4 space-y-2 max-h-96 overflow-y-auto">
-              {messages.map((m) => (
-                <div key={m.id} className={`flex ${m.direction === "out" ? "justify-end" : "justify-start"}`}>
-                  <div
-                    className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${
-                      m.direction === "out" ? "bg-stone-900 text-white" : "bg-stone-100 text-stone-800"
-                    }`}
-                  >
-                    <p className="whitespace-pre-wrap">{m.text}</p>
-                    <p className={`text-[10px] mt-1 ${m.direction === "out" ? "text-stone-400" : "text-stone-400"}`}>
-                      {m.direction === "out" ? t.msgFromUs : t.msgFromClient} · {formatDateTime(m.created_at, lang)}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+          <MessageThread clientId={client.id} messages={messages} paused={Boolean(client.agent_paused)} lang={lang} sampleMode={sampleMode} />
         </section>
 
         <section className="mb-8">
@@ -316,6 +298,16 @@ function describeEvent(e: AgentEvent, lang: Lang): string {
         .filter(Boolean)
         .join(" · ");
     }
+    case "takeover":
+      return uk ? `Розмову перебрала команда (${String(d.by ?? "")})` : `Team took over (${String(d.by ?? "")})`;
+    case "handback":
+      return uk ? "Розмову повернуто агенту" : "Conversation handed back to the agent";
+    case "paused_skip":
+      return uk ? "Клієнт написав, поки розмову веде команда — агент не відповідав" : "Client wrote while the team is in charge — agent stayed silent";
+    case "message_edited":
+      return uk ? `Команда відредагувала надіслане повідомлення: «${String(d.after ?? "").slice(0, 80)}»` : `Team edited a sent message: “${String(d.after ?? "").slice(0, 80)}”`;
+    case "message_deleted":
+      return uk ? "Команда видалила повідомлення з чату клієнта" : "Team deleted a message from the client's chat";
     case "order_placed":
       return `${uk ? "Замовлення оформлено" : "Order placed"} · ${d.total} ₴ · ${String(d.approval)}`;
     case "order_amended":

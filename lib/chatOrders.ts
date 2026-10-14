@@ -9,6 +9,7 @@ import {
   saveClientProfile,
 } from "@/lib/orders";
 import { sendTelegramMessage } from "@/lib/telegram";
+import { nudgeUnansweredQuestions } from "@/lib/teamQuestions";
 
 type Db = ReturnType<typeof createSupabaseServerClient>;
 
@@ -45,6 +46,8 @@ export interface OrderDraft {
   summary_at_inbound?: number;
   summary_message_id?: number; // the Telegram message holding the summary (what a 👍 approves)
   summary_sent_at?: string;
+  // Missing for free delivery when the client was last shown a summary (to notice "added something, still short").
+  shortfall_uah?: number;
 }
 
 export type Approval = "text" | "reaction" | "continued" | "implicit" | "safety";
@@ -236,9 +239,22 @@ export async function handleReactionApproval(
     .eq("client_id", client.id)
     .order("last_message_at", { ascending: false })
     .limit(3);
+  // A 👍 on the summary itself approves it — and so does a positive reaction on any of OUR
+  // messages sent after the summary (e.g. the client likes "Чи все вірно?" instead of the summary).
+  const { data: reacted } = await db
+    .from("messages")
+    .select("created_at")
+    .eq("client_id", client.id)
+    .eq("direction", "out")
+    .eq("telegram_message_id", input.messageId)
+    .limit(1)
+    .maybeSingle();
   for (const c of convos ?? []) {
     const draft = (c.captured_fields as Record<string, unknown> | null)?.draft_order as OrderDraft | undefined;
-    if (!draft || draft.summary_message_id !== input.messageId) continue;
+    if (!draft || !isSummarized(draft) || missingFields(draft).length > 0) continue;
+    const onSummary = draft.summary_message_id === input.messageId;
+    const afterSummary = Boolean(reacted && draft.summary_sent_at && Date.parse(reacted.created_at as string) >= Date.parse(draft.summary_sent_at) - 2000);
+    if (!onSummary && !afterSummary) continue;
     const placed = await placeChatOrder(db, {
       client: { id: client.id as string, business_name: client.business_name as string },
       conversationId: c.id as string,
@@ -248,7 +264,7 @@ export async function handleReactionApproval(
     await logAgentEvent(db, client.id as string, "reaction_approval", { emojis: input.emojis, placed: placed.ok, reason: placed.ok ? null : placed.reason });
     if (placed.ok) {
       const sent = await sendTelegramMessage(input.chatId, ACK_TEXT);
-      if (sent.ok) await db.from("messages").insert({ client_id: client.id, conversation_id: c.id, direction: "out", text: ACK_TEXT, telegram_message_id: sent.messageId ?? null });
+      if (sent.ok) await db.from("messages").insert({ client_id: client.id, conversation_id: c.id, direction: "out", text: ACK_TEXT, telegram_message_id: sent.messageId ?? null, sent_by: "agent" });
     }
     return placed.ok;
   }
@@ -261,6 +277,7 @@ export async function handleReactionApproval(
 // ago and which the client hasn't touched since. Runs opportunistically (any
 // incoming Telegram update, a dashboard visit) and from the daily cron.
 export async function sweepPendingOrders(db: Db, opts: { excludeClientId?: string } = {}): Promise<number> {
+  await nudgeUnansweredQuestions(db).catch((err) => console.error("question nudge failed", err));
   const rules = await getOrderingRules(db);
   if (!rules.auto_confirm_minutes) return 0;
   const cutoff = Date.now() - rules.auto_confirm_minutes * 60 * 1000;
@@ -300,7 +317,7 @@ export async function sweepPendingOrders(db: Db, opts: { excludeClientId?: strin
       if (client.telegram_chat_id) {
         const text = "Оформили ваше замовлення за підсумком вище ✅ Менеджер підтвердить деталі та дату. Якщо щось змінити — напишіть.";
         const sent = await sendTelegramMessage(client.telegram_chat_id as string, text);
-        if (sent.ok) await db.from("messages").insert({ client_id: client.id, conversation_id: c.id, direction: "out", text, telegram_message_id: sent.messageId ?? null });
+        if (sent.ok) await db.from("messages").insert({ client_id: client.id, conversation_id: c.id, direction: "out", text, telegram_message_id: sent.messageId ?? null, sent_by: "agent" });
       }
     }
   }

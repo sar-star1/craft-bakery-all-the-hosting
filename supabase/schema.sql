@@ -18,6 +18,9 @@ create table clients (
   -- new_lead: just arrived · in_conversation: talking · dormant: talked, never ordered
   -- first_order: one order · recurring: two or more
   lead_temperature text check (lead_temperature in ('cold', 'warm')),  -- cold: has questions · warm: something blocks them
+  agent_lock_until timestamptz,                 -- one agent run per client at a time
+  agent_paused boolean not null default false,  -- the team has taken over: the agent stays silent
+  agent_paused_at timestamptz,
   blocker_note text,
   fop text,                    -- remembered from orders, so repeat clients only confirm
   delivery_address text,
@@ -155,6 +158,8 @@ create table pending_replies (
   reaction text,                         -- emoji to put on the client's message together with this reply
   reaction_message_id bigint,
   shows_summary boolean not null default false,  -- carries an order summary (what a 👍 approves)
+  team_question text,                            -- what the agent needs the team to answer
+  reminded_at timestamptz,                       -- the group was nudged about an unanswered question
   edited boolean not null default false,   -- rewritten from admin feedback before approval
   admin_message_id bigint,   -- the alert in the admin Telegram group (buttons + reply-to-edit)
   created_at timestamptz default now()
@@ -201,6 +206,9 @@ create table messages (
   direction text not null check (direction in ('in', 'out')),
   text text not null,
   telegram_message_id bigint,
+  sent_by text check (sent_by in ('agent', 'team')),  -- who wrote an outgoing message
+  edited_at timestamptz,                               -- the team edited it after it was sent
+  deleted_at timestamptz,                              -- the team removed it from the client's chat
   created_at timestamptz default now()
 );
 
@@ -253,7 +261,7 @@ on conflict (id) do nothing;
 -- Ordering numbers the team edits in Settings: smallest order, free-delivery
 -- threshold and the fee below it (all UAH).
 insert into site_content (key, content_json) values
-  ('ordering_rules', '{"min_order_total": 1000, "free_delivery_from": 2000, "delivery_fee": 250, "auto_confirm_minutes": 30}'::jsonb),
+  ('ordering_rules', '{"min_order_total": 1000, "free_delivery_from": 2000, "delivery_fee": 250, "auto_confirm_minutes": 120}'::jsonb),
   ('telegram_routing', '{}'::jsonb)   -- where staff alerts go: orders topic/chat (Settings)
 on conflict (key) do nothing;
 
@@ -301,3 +309,12 @@ create table agent_events (
 );
 create index agent_events_client_idx on agent_events(client_id, created_at desc);
 alter table agent_events enable row level security;
+
+-- Messages posted in the staff group while the team has taken over a client's
+-- conversation: replying to one of them sends the reply to that client.
+create table relayed_messages (
+  admin_message_id bigint primary key,
+  client_id uuid references clients(id) on delete cascade,
+  created_at timestamptz default now()
+);
+alter table relayed_messages enable row level security;

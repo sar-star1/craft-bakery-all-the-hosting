@@ -290,6 +290,13 @@ export async function runOrderTool(name: string, args: Record<string, unknown>, 
       const priced = await priceOrderLines(supabase, draft.lines.map((l) => ({ item_id: l.item_id, qty: l.qty })));
       if (!priced.ok) return json({ lines: draft.lines.map((l) => ({ name: l.name, qty: l.qty })), problems: priced.issues, missing });
 
+      const toFree = priced.delivery_fee > 0 ? priced.rules.free_delivery_from - priced.total : 0;
+      // Told before how much was missing, the client added something, and it is still not enough.
+      const stillShort = toFree > 0 && draft.shortfall_uah !== undefined && toFree < draft.shortfall_uah;
+      draft.shortfall_uah = toFree > 0 ? toFree : undefined;
+      ctx.flags.freeDeliveryShortfall = toFree > 0 ? toFree : undefined;
+      ctx.flags.stillShortAfterAdding = stillShort;
+
       draft.summary_at_inbound = ctx.inboundCount;
       draft.summary_message_id = undefined;
       draft.summary_sent_at = undefined;
@@ -297,7 +304,6 @@ export async function runOrderTool(name: string, args: Record<string, unknown>, 
       // The reply that carries this summary is remembered once it is actually sent,
       // so a reaction to it can approve the order.
       if (missing.length === 0) ctx.flags.summaryShown = true;
-      const toFree = priced.delivery_fee > 0 ? priced.rules.free_delivery_from - priced.total : 0;
       return json({
         lines: priced.lines.map((l) => ({ name: l.name, qty: l.qty, unit_price_uah: l.unit_price, subtotal_uah: l.subtotal })),
         goods_total_uah: priced.total,
@@ -305,6 +311,9 @@ export async function runOrderTool(name: string, args: Record<string, unknown>, 
         grand_total_uah: priced.grand_total,
         free_delivery_from_uah: priced.rules.free_delivery_from,
         ...(toFree > 0 ? { add_for_free_delivery_uah: toFree } : {}),
+        ...(stillShort
+          ? { still_short_after_adding: true, note: `The client was already told what was missing for free delivery and added something, but ${toFree} UAH is still missing. Say so warmly and plainly, with the exact number.` }
+          : {}),
         details: {
           venue_name: draft.venue_name ?? null,
           fop: draft.fop ?? null,
@@ -324,6 +333,8 @@ export async function runOrderTool(name: string, args: Record<string, unknown>, 
 
     case "place_order": {
       const NOT_ACCEPTED = " Do NOT tell the client the order is accepted — it is not in the system.";
+      // The system already placed it this turn (the client's message was the approval).
+      if (ctx.flags.placedBySystem) return "The order is already in the system — it was placed automatically when the client approved. Tell the client it is accepted and that a manager will confirm the details and date. Do not call place_order again.";
       if (args.client_confirmed !== true) return `Not placed: the client has not approved the summary.${NOT_ACCEPTED}`;
       const approval: Approval = args.approval === "continued" ? "continued" : "text";
       const draft = await loadDraft(ctx);

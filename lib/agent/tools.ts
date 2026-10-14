@@ -130,10 +130,16 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
   {
     name: "request_human_review",
     description:
-      "Call when you're unsure, the client is upset, asks for something outside the tools' coverage, or a tool returned nothing usable. Your drafted reply will wait for a human to approve instead of being sent automatically.",
+      "Actually ask the team. Call it whenever you are unsure, the client is upset, asks for something outside the tools' coverage, or a tool returned nothing usable — and ALWAYS before telling a client that you will check, clarify or pass something on (never promise that without calling this). The team is alerted in the staff group with your question; your reply waits for a person to approve it instead of being sent automatically.",
     input_schema: {
       type: "object",
-      properties: { reason: { type: "string" } },
+      properties: {
+        reason: { type: "string", description: "Why a person is needed." },
+        question: {
+          type: "string",
+          description: "The exact thing the team must find out or decide, one sentence in Ukrainian, e.g. «Чи робимо безглютенову випічку під замовлення?». Leave out only for complaints/upset clients where there is no question.",
+        },
+      },
       required: ["reason"],
     },
   },
@@ -303,7 +309,8 @@ export async function runTool(name: string, input: unknown, ctx: ToolContext): P
 
     case "request_human_review": {
       flags.humanReviewReasons.push(String(args.reason ?? "unspecified"));
-      return "Noted. Write the best reply you can; a human will review it before it's sent.";
+      if (typeof args.question === "string" && args.question.trim()) flags.teamQuestion = args.question.trim().slice(0, 400);
+      return "Noted — the team is being asked. Now write a short, warm and honest reply for the client: say you are checking this with the team and will come back to them. No invented answer, no time promises. A person approves it before it is sent.";
     }
 
     default:

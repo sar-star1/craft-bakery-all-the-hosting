@@ -65,6 +65,21 @@ export function editTelegramMessage(chatId: string, messageId: number, text: str
   });
 }
 
+// Rewrites a message the bot sent earlier (in a client's chat). Unlike editTelegramMessage
+// this reports whether Telegram accepted it. Telegram answers "message is not modified"
+// when the text is identical — that is fine, the chat already shows it.
+export async function editSentMessage(chatId: string, messageId: number, text: string): Promise<{ ok: boolean; error?: string }> {
+  const r = await telegramApi("editMessageText", { chat_id: chatId, message_id: messageId, text: text.slice(0, 4096) });
+  if (r.ok) return { ok: true };
+  return /not modified/i.test(r.error) ? { ok: true } : { ok: false, error: r.error };
+}
+
+// Removes a message the bot sent from the client's chat.
+export async function deleteSentMessage(chatId: string, messageId: number): Promise<{ ok: boolean; error?: string }> {
+  const r = await telegramApi("deleteMessage", { chat_id: chatId, message_id: messageId });
+  return r.ok ? { ok: true } : { ok: false, error: r.error };
+}
+
 // Reactions a bot may use (a safe subset of Telegram's free emoji set).
 export const ALLOWED_REACTIONS = ["👍", "❤", "🙏", "🔥", "👌"] as const;
 
