@@ -20,7 +20,7 @@ export async function getKnowledge(db: Db): Promise<string[]> {
     .select("text, expires_at")
     .or(`expires_at.is.null,expires_at.gte.${todayKyiv()}`)
     .order("created_at", { ascending: true })
-    .limit(60);
+    .limit(300);
   return (data ?? []).map((r) => {
     const until = formatValidity(r.expires_at as string | null);
     return until ? `${r.text} (${until})` : String(r.text);
