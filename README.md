@@ -191,6 +191,11 @@ PowerPoint, 4 MB each). They are sent after the text of each approved message.
 
 ## Approval policy (`lib/agent/policy.ts`)
 
+**Strict mode (default for now):** every reply the agent writes waits in the staff group for ✅
+(`AGENT_APPROVE_ALL`; set it to `false` in Vercel and redeploy to switch back to the policy below).
+Fixed system texts — the /start greeting and the "order accepted" notices sent when the system itself
+places an order — still go out automatically.
+
 A reply to a client who just wrote in auto-sends only when it is routine:
 an established client, no mass-order signal, nothing that commits the
 bakery, and the model didn't ask for a human. Everything else — first-time
