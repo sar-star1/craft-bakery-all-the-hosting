@@ -8,6 +8,7 @@ process.env.TELEGRAM_BOT_TOKEN = "000:fake";
 process.env.TELEGRAM_ADMIN_GROUP_ID = "-1001";
 process.env.SITE_URL = "https://example.com";
 process.env.ANTHROPIC_API_KEY = "test-key";
+process.env.AGENT_APPROVE_ALL = "false"; // these checks are about approval of orders; strict mode has its own check at the end
 const tg = stubTelegram();
 const srv = await start(54795);
 setTimeout(() => { console.log("TIMEOUT — test hung"); process.exit(2); }, 90000).unref();
@@ -154,6 +155,24 @@ check("«Додали до вашого замовлення…» without amend_
 check("…but fine when amend_last_order ran", replyProblem("Додали ще 10 круасанів до вашого замовлення", { humanReviewReasons: [], orderAmended: true }) === null);
 check("…and when it is a new draft being built", replyProblem("Додали круасани в замовлення", { humanReviewReasons: [], toolsUsed: ["update_order_draft"] }) === null);
 check("ordinary text isn't flagged", !claimsOrderChanged("Яка адреса доставки?"));
+
+// ---- strict mode (the default): even a routine reply to an established client waits for the team
+delete process.env.AGENT_APPROVE_ALL;
+reset("11111111-1111-4111-8111-111111111111", { draft_order: draft() });
+tables.clients[0].pipeline_stage = "recurring";
+agentReply = "Дякуємо! Замовлення прийнято.";
+await say("Ок", 120);
+check("strict mode: the order is still placed, but the reply is held, not sent", tables.orders.length === 1 && sentToClient().length === 0 && tables.pending_replies.length === 1, JSON.stringify({ sent: sentToClient(), held: tables.pending_replies.length }));
+check("strict mode: the group gets the draft with ✅ / 🚫 buttons", tg.some((c) => c.body.chat_id === "-1001" && c.body.reply_markup?.inline_keyboard?.flat().some((b) => b.callback_data?.startsWith("ap:"))));
+const { sendPendingReply } = await import("../lib/replies.ts");
+tables.pending_replies[0].status ??= "awaiting_approval"; // the real table defaults it
+await sendPendingReply(tables.pending_replies[0].id);
+check("pressing ✅ sends it to the client", sentToClient().includes("Дякуємо! Замовлення прийнято."));
+process.env.AGENT_APPROVE_ALL = "false";
+reset("11111111-1111-4111-8111-111111111111", { draft_order: draft() });
+tables.clients[0].pipeline_stage = "recurring";
+await say("Ок", 130);
+check("AGENT_APPROVE_ALL=false brings back auto-send for established clients", sentToClient().length === 1 && tables.pending_replies.length === 0);
 
 const ok = done();
 srv.close();

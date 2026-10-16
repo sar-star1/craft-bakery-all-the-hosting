@@ -22,6 +22,11 @@ export interface TurnFlags {
   stillShortAfterAdding?: boolean;
 }
 
+// Strict mode: EVERY reply the agent writes waits in the staff group for a person's ✅, however
+// routine. On by default; set AGENT_APPROVE_ALL=false (Vercel → Settings → Environment Variables,
+// then redeploy) to go back to the middle-ground policy below.
+export const approveAllReplies = () => process.env.AGENT_APPROVE_ALL !== "false";
+
 export type ReplyDecision = { mode: "send" } | { mode: "gate"; reason: string };
 
 // "Middle ground" approval policy, for replies to a client who just wrote in
@@ -50,6 +55,9 @@ export function decideOrderFlowReply(input: {
   }
   if (pipelineStage === "new_lead" || pipelineStage === "in_conversation" || pipelineStage === "dormant") {
     return { mode: "gate", reason: "client hasn't ordered yet" };
+  }
+  if (approveAllReplies()) {
+    return { mode: "gate", reason: "усі відповіді проходять перевірку команди" };
   }
   return { mode: "send" };
 }
