@@ -8,6 +8,11 @@ type Db = ReturnType<typeof createSupabaseServerClient>;
 // Standing rules from the team ("answer only what's asked", ...). They're
 // appended to every prompt the agent runs on, so a correction made once in the
 // admin group applies to all future conversations.
+// Every active rule reaches the agent. A cap here silently drops the NEWEST ones (the list is
+// oldest-first), which is exactly how freshly taught rules used to "not work". The ceiling is only
+// a runaway guard; Settings warns long before it.
+export const MAX_GUIDELINES = 300;
+
 export async function getActiveGuidelines(db: Db): Promise<string[]> {
   const { data } = await db
     .from("agent_guidelines")
@@ -15,7 +20,7 @@ export async function getActiveGuidelines(db: Db): Promise<string[]> {
     .eq("active", true)
     .or(`expires_at.is.null,expires_at.gte.${todayKyiv()}`)
     .order("created_at", { ascending: true })
-    .limit(40);
+    .limit(MAX_GUIDELINES);
   return (data ?? []).map((r) => String(r.text));
 }
 

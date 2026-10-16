@@ -103,7 +103,9 @@ function TeachList({
   onAdd,
   onEdit,
   onDelete,
+  warnAbove,
 }: {
+  warnAbove?: number;
   intro: string;
   empty: string;
   placeholder: string;
@@ -128,6 +130,11 @@ function TeachList({
   return (
     <>
       <p className="text-[12px] text-stone-500 mb-3">{intro}</p>
+      {warnAbove !== undefined && items.length > warnAbove && (
+        <p className="text-[12px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2 mb-3">
+          Тут уже {items.length} записів. Агент отримує їх усі, але чим їх більше, тим гірше він дотримується кожного, особливо якщо вони дублюються чи суперечать одне одному. Видаліть застарілі й повтори.
+        </p>
+      )}
       {items.length === 0 ? (
         <p className="text-sm text-stone-400 mb-3">{empty}</p>
       ) : (
@@ -486,6 +493,7 @@ export default function SetupPanel({ status }: { status: SetupStatus }) {
           <OrderingRulesForm initial={status.ordering} />
           <h3 className="font-medium text-sm mt-5 mb-1">Правила</h3>
           <TeachList
+            warnAbove={60}
             intro="Діють у кожній відповіді агента та в чернетках нагадувань."
             empty="Правил поки немає."
             placeholder="Напр.: Звертайся на «ви». Не пропонуй знижок. Не став запитань у кінці, якщо не треба."
