@@ -218,7 +218,7 @@ export function isApprovingReaction(emojis: string[]): boolean {
   return emojis.length > 0 && emojis.some((e) => !NEGATIVE_REACTIONS.has(e));
 }
 
-const ACK_TEXT = "Прийнято ✅ Менеджер підтвердить деталі та дату. Якщо щось змінити — напишіть.";
+const ACK_TEXT = "Прийнято ✅ Якщо щось змінити — напишіть.";
 
 // A client put a reaction on a message. If it's on the order summary and it's a
 // positive one, that is the approval: place the order and acknowledge it.
@@ -315,7 +315,7 @@ export async function sweepPendingOrders(db: Db, opts: { excludeClientId?: strin
     if (result.ok) {
       placed++;
       if (client.telegram_chat_id) {
-        const text = "Оформили ваше замовлення за підсумком вище ✅ Менеджер підтвердить деталі та дату. Якщо щось змінити — напишіть.";
+        const text = "Оформили ваше замовлення за підсумком вище ✅ Якщо щось змінити — напишіть.";
         const sent = await sendTelegramMessage(client.telegram_chat_id as string, text);
         if (sent.ok) await db.from("messages").insert({ client_id: client.id, conversation_id: c.id, direction: "out", text, telegram_message_id: sent.messageId ?? null, sent_by: "agent" });
       }

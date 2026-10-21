@@ -334,7 +334,7 @@ export async function runOrderTool(name: string, args: Record<string, unknown>, 
     case "place_order": {
       const NOT_ACCEPTED = " Do NOT tell the client the order is accepted — it is not in the system.";
       // The system already placed it this turn (the client's message was the approval).
-      if (ctx.flags.placedBySystem) return "The order is already in the system — it was placed automatically when the client approved. Tell the client it is accepted and that a manager will confirm the details and date. Do not call place_order again.";
+      if (ctx.flags.placedBySystem) return "The order is already in the system — it was placed automatically when the client approved. Tell the client it is accepted (speak as the bakery; do not mention a separate manager or promise to confirm details and date — the team's rule). Do not call place_order again.";
       if (args.client_confirmed !== true) return `Not placed: the client has not approved the summary.${NOT_ACCEPTED}`;
       const approval: Approval = args.approval === "continued" ? "continued" : "text";
       const draft = await loadDraft(ctx);
@@ -349,7 +349,7 @@ export async function runOrderTool(name: string, args: Record<string, unknown>, 
         if (!priced.ok) return `Not placed: ${priced.issues.join("; ")}${NOT_ACCEPTED}`;
         await saveDraft(ctx, null);
         const summary = priced.lines.map((l) => `${l.name} ×${l.qty}`).join(", ");
-        return `Practice mode: the order would be in the system now (${summary}; goods ${priced.total} UAH + delivery ${priced.delivery_fee} UAH = ${priced.grand_total} UAH). Nothing was saved. Tell the client it's accepted and a manager will confirm details and date. The client's NEXT message is a new order unless they explicitly ask to change this one.`;
+        return `Practice mode: the order would be in the system now (${summary}; goods ${priced.total} UAH + delivery ${priced.delivery_fee} UAH = ${priced.grand_total} UAH). Nothing was saved. Tell the client it's accepted (speak as the bakery; do not mention a separate manager or promise to confirm details and date). The client's NEXT message is a new order unless they explicitly ask to change this one.`;
       }
 
       const res = await placeChatOrder(supabase, { client, conversationId: ctx.conversationId, draft, approval });
@@ -359,7 +359,7 @@ export async function runOrderTool(name: string, args: Record<string, unknown>, 
         return `Not placed: ${res.reason}.${NOT_ACCEPTED}`;
       }
       ctx.flags.orderPlaced = true;
-      return `Order placed and visible to the team in the dashboard (${res.summary}; goods ${res.goods} UAH + delivery ${res.deliveryFee} UAH = ${res.grandTotal} UAH). Tell the client it's accepted and that a manager will confirm the details and delivery date. Do not promise a specific time. The client's NEXT message is a NEW order unless they explicitly ask to change this one (then use amend_last_order).`;
+      return `Order placed and visible to the team in the dashboard (${res.summary}; goods ${res.goods} UAH + delivery ${res.deliveryFee} UAH = ${res.grandTotal} UAH). Tell the client it's accepted (speak as the bakery; do not mention a separate manager or promise to confirm details and date — the team's rule). Do not promise a specific time. The client's NEXT message is a NEW order unless they explicitly ask to change this one (then use amend_last_order).`;
     }
 
     case "amend_last_order": {
