@@ -67,3 +67,11 @@ export async function classifyVerdict(
   }
   return { verdict: fallbackVerdict(text), via: "fallback" };
 }
+
+// Does this reply show the client an order summary with this total? Used to notice a summary the
+// model wrote WITHOUT calling review_order (so the system still knows the client has seen it).
+export function replyShowsTotal(reply: string, grandTotal: number): boolean {
+  const flat = reply.replace(/[\s\u00a0\u202f]/g, "");
+  return new RegExp(`(?<![\\d])${grandTotal}(?![\\d])`).test(flat);
+}
+

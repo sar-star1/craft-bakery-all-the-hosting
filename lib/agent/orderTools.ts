@@ -273,6 +273,7 @@ export async function runOrderTool(name: string, args: Record<string, unknown>, 
       draft.summary_message_id = undefined;
       draft.summary_sent_at = undefined;
       await saveDraft(ctx, draft);
+      ctx.flags.draftComplete = draft.lines.length > 0 && missingFields(draft).length === 0;
       return json({
         saved: true,
         items_in_draft: draft.lines.length,
@@ -304,6 +305,7 @@ export async function runOrderTool(name: string, args: Record<string, unknown>, 
       // The reply that carries this summary is remembered once it is actually sent,
       // so a reaction to it can approve the order.
       if (missing.length === 0) ctx.flags.summaryShown = true;
+      ctx.flags.draftComplete = missing.length === 0;
       return json({
         lines: priced.lines.map((l) => ({ name: l.name, qty: l.qty, unit_price_uah: l.unit_price, subtotal_uah: l.subtotal })),
         goods_total_uah: priced.total,
@@ -341,7 +343,7 @@ export async function runOrderTool(name: string, args: Record<string, unknown>, 
       const missing = missingFields(draft);
       if (missing.length) return `Not placed: still missing ${missing.join(", ")}. Ask the client for these, then review_order again.${NOT_ACCEPTED}`;
       if (!isSummarized(draft) || ctx.inboundCount <= (draft.summary_at_inbound ?? Infinity)) {
-        return `Not placed: first show the client the summary from review_order and wait for their approval in a LATER message.${NOT_ACCEPTED}`;
+        return `Not placed: no summary of this order is on record yet — first show the client the summary from review_order and wait for their approval in a LATER message.${NOT_ACCEPTED} This is not an error to report: never apologise, never tell the client the order was "not registered" or that anything went wrong — just call review_order and present the summary as the normal next step.`;
       }
 
       if (ctx.dryRun) {
