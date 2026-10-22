@@ -11,6 +11,7 @@ import { orderStateBlock, type LastOrderInfo, type OrderStateInput } from "@/lib
 import { isSummarized, missingFields, type OrderDraft } from "@/lib/chatOrders";
 import { classifySummaryReply, draftText } from "@/lib/orderApproval";
 import { priceOrderLines } from "@/lib/orders";
+import { replyShowsTotal } from "@/lib/orderVerdict";
 import type { TurnFlags } from "@/lib/agent/policy";
 import { requireAdmin } from "@/lib/auth";
 import { PAYMENT_LABEL } from "@/lib/orderRules";
@@ -104,6 +105,12 @@ export async function practiceReply(
       practiceState,
     });
     if (!text) return { ok: false, error: flags.humanReviewReasons.join("; ") || "Агент не дав відповіді." };
+    // Same safety net as in real chats: a summary written without review_order still counts as shown.
+    const shownDraft = practiceState.draft_order as OrderDraft | undefined;
+    if (shownDraft && shownDraft.lines.length > 0 && missingFields(shownDraft).length === 0 && shownDraft.summary_at_inbound !== clientTurns) {
+      const priced = await priceOrderLines(db, shownDraft.lines.map((l) => ({ item_id: l.item_id, qty: l.qty })));
+      if (priced.ok && replyShowsTotal(text, priced.grand_total)) shownDraft.summary_at_inbound = clientTurns;
+    }
     const notes = [
       ...flags.humanReviewReasons.map((r) => `Передав би людині: ${r}`),
       ...(justPlaced ? [`Оформив би замовлення: клієнт підтвердив ${justPlaced.mode === "ack" ? "підсумок" : "підсумок і написав ще щось"} — без жодного перепитування`] : []),

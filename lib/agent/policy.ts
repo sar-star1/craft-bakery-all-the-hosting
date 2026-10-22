@@ -9,6 +9,8 @@ export interface TurnFlags {
   reaction?: string;
   // The reply carries a priced order summary (its Telegram message is what a 👍 approves).
   summaryShown?: boolean;
+  // The order draft is complete (nothing missing) after the latest tool call this turn.
+  draftComplete?: boolean;
   orderPlaced?: boolean;
   // The order was placed by the system itself, from the client's approving message, before the agent ran.
   placedBySystem?: boolean;

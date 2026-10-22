@@ -10,6 +10,7 @@ import {
 } from "@/lib/orders";
 import { sendTelegramMessage } from "@/lib/telegram";
 import { nudgeUnansweredQuestions } from "@/lib/teamQuestions";
+import { replyShowsTotal } from "@/lib/orderVerdict";
 
 type Db = ReturnType<typeof createSupabaseServerClient>;
 
@@ -100,6 +101,24 @@ export async function markSummarySent(db: Db, conversationId: string, messageId:
   draft.summary_message_id = messageId;
   draft.summary_sent_at = new Date().toISOString();
   await saveDraftFor(db, conversationId, draft);
+}
+
+// The agent is supposed to build every summary with review_order, which is what tells the system
+// "the client has now seen this summary" (and so that their next message can approve it). Models
+// sometimes write the summary themselves after an edit. If a complete draft is on record and the
+// reply states its exact total, that IS the summary — record it the same way, so "ок" after it is
+// recognised instead of the bot panicking that the order was never confirmed.
+export async function noteSummaryShown(db: Db, conversationId: string, reply: string, inboundCount: number): Promise<boolean> {
+  const draft = await loadDraftFor(db, conversationId);
+  if (!draft || draft.lines.length === 0 || missingFields(draft).length > 0) return false;
+  if (isSummarized(draft) && draft.summary_at_inbound === inboundCount) return true;
+  const priced = await priceOrderLines(db, draft.lines.map((l) => ({ item_id: l.item_id, qty: l.qty })));
+  if (!priced.ok || !replyShowsTotal(reply, priced.grand_total)) return false;
+  draft.summary_at_inbound = inboundCount;
+  draft.summary_message_id = undefined;
+  draft.summary_sent_at = undefined;
+  await saveDraftFor(db, conversationId, draft);
+  return true;
 }
 
 export async function logAgentEvent(db: Db, clientId: string | null, kind: string, detail: Record<string, unknown>) {
@@ -218,7 +237,7 @@ export function isApprovingReaction(emojis: string[]): boolean {
   return emojis.length > 0 && emojis.some((e) => !NEGATIVE_REACTIONS.has(e));
 }
 
-const ACK_TEXT = "Прийнято ✅ Менеджер підтвердить деталі та дату. Якщо щось змінити — напишіть.";
+const ACK_TEXT = "Прийнято ✅ Якщо щось змінити — напишіть.";
 
 // A client put a reaction on a message. If it's on the order summary and it's a
 // positive one, that is the approval: place the order and acknowledge it.
@@ -315,7 +334,7 @@ export async function sweepPendingOrders(db: Db, opts: { excludeClientId?: strin
     if (result.ok) {
       placed++;
       if (client.telegram_chat_id) {
-        const text = "Оформили ваше замовлення за підсумком вище ✅ Менеджер підтвердить деталі та дату. Якщо щось змінити — напишіть.";
+        const text = "Оформили ваше замовлення за підсумком вище ✅ Якщо щось змінити — напишіть.";
         const sent = await sendTelegramMessage(client.telegram_chat_id as string, text);
         if (sent.ok) await db.from("messages").insert({ client_id: client.id, conversation_id: c.id, direction: "out", text, telegram_message_id: sent.messageId ?? null, sent_by: "agent" });
       }

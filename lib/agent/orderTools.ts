@@ -273,6 +273,7 @@ export async function runOrderTool(name: string, args: Record<string, unknown>, 
       draft.summary_message_id = undefined;
       draft.summary_sent_at = undefined;
       await saveDraft(ctx, draft);
+      ctx.flags.draftComplete = draft.lines.length > 0 && missingFields(draft).length === 0;
       return json({
         saved: true,
         items_in_draft: draft.lines.length,
@@ -304,6 +305,7 @@ export async function runOrderTool(name: string, args: Record<string, unknown>, 
       // The reply that carries this summary is remembered once it is actually sent,
       // so a reaction to it can approve the order.
       if (missing.length === 0) ctx.flags.summaryShown = true;
+      ctx.flags.draftComplete = missing.length === 0;
       return json({
         lines: priced.lines.map((l) => ({ name: l.name, qty: l.qty, unit_price_uah: l.unit_price, subtotal_uah: l.subtotal })),
         goods_total_uah: priced.total,
@@ -334,14 +336,14 @@ export async function runOrderTool(name: string, args: Record<string, unknown>, 
     case "place_order": {
       const NOT_ACCEPTED = " Do NOT tell the client the order is accepted — it is not in the system.";
       // The system already placed it this turn (the client's message was the approval).
-      if (ctx.flags.placedBySystem) return "The order is already in the system — it was placed automatically when the client approved. Tell the client it is accepted and that a manager will confirm the details and date. Do not call place_order again.";
+      if (ctx.flags.placedBySystem) return "The order is already in the system — it was placed automatically when the client approved. Tell the client it is accepted (speak as the bakery; do not mention a separate manager or promise to confirm details and date — the team's rule). Do not call place_order again.";
       if (args.client_confirmed !== true) return `Not placed: the client has not approved the summary.${NOT_ACCEPTED}`;
       const approval: Approval = args.approval === "continued" ? "continued" : "text";
       const draft = await loadDraft(ctx);
       const missing = missingFields(draft);
       if (missing.length) return `Not placed: still missing ${missing.join(", ")}. Ask the client for these, then review_order again.${NOT_ACCEPTED}`;
       if (!isSummarized(draft) || ctx.inboundCount <= (draft.summary_at_inbound ?? Infinity)) {
-        return `Not placed: first show the client the summary from review_order and wait for their approval in a LATER message.${NOT_ACCEPTED}`;
+        return `Not placed: no summary of this order is on record yet — first show the client the summary from review_order and wait for their approval in a LATER message.${NOT_ACCEPTED} This is not an error to report: never apologise, never tell the client the order was "not registered" or that anything went wrong — just call review_order and present the summary as the normal next step.`;
       }
 
       if (ctx.dryRun) {
@@ -349,7 +351,7 @@ export async function runOrderTool(name: string, args: Record<string, unknown>, 
         if (!priced.ok) return `Not placed: ${priced.issues.join("; ")}${NOT_ACCEPTED}`;
         await saveDraft(ctx, null);
         const summary = priced.lines.map((l) => `${l.name} ×${l.qty}`).join(", ");
-        return `Practice mode: the order would be in the system now (${summary}; goods ${priced.total} UAH + delivery ${priced.delivery_fee} UAH = ${priced.grand_total} UAH). Nothing was saved. Tell the client it's accepted and a manager will confirm details and date. The client's NEXT message is a new order unless they explicitly ask to change this one.`;
+        return `Practice mode: the order would be in the system now (${summary}; goods ${priced.total} UAH + delivery ${priced.delivery_fee} UAH = ${priced.grand_total} UAH). Nothing was saved. Tell the client it's accepted (speak as the bakery; do not mention a separate manager or promise to confirm details and date). The client's NEXT message is a new order unless they explicitly ask to change this one.`;
       }
 
       const res = await placeChatOrder(supabase, { client, conversationId: ctx.conversationId, draft, approval });
@@ -359,7 +361,7 @@ export async function runOrderTool(name: string, args: Record<string, unknown>, 
         return `Not placed: ${res.reason}.${NOT_ACCEPTED}`;
       }
       ctx.flags.orderPlaced = true;
-      return `Order placed and visible to the team in the dashboard (${res.summary}; goods ${res.goods} UAH + delivery ${res.deliveryFee} UAH = ${res.grandTotal} UAH). Tell the client it's accepted and that a manager will confirm the details and delivery date. Do not promise a specific time. The client's NEXT message is a NEW order unless they explicitly ask to change this one (then use amend_last_order).`;
+      return `Order placed and visible to the team in the dashboard (${res.summary}; goods ${res.goods} UAH + delivery ${res.deliveryFee} UAH = ${res.grandTotal} UAH). Tell the client it's accepted (speak as the bakery; do not mention a separate manager or promise to confirm details and date — the team's rule). Do not promise a specific time. The client's NEXT message is a NEW order unless they explicitly ask to change this one (then use amend_last_order).`;
     }
 
     case "amend_last_order": {

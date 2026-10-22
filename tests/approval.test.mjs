@@ -156,6 +156,29 @@ check("…but fine when amend_last_order ran", replyProblem("Додали ще 1
 check("…and when it is a new draft being built", replyProblem("Додали круасани в замовлення", { humanReviewReasons: [], toolsUsed: ["update_order_draft"] }) === null);
 check("ordinary text isn't flagged", !claimsOrderChanged("Яка адреса доставки?"));
 
+// ---- THE REAL BUG: the model shows a summary it wrote itself (no review_order), the client says "ок"
+{
+  const id = "11111111-1111-4111-8111-111111111111";
+  reset(id, { draft_order: draft({ summary_at_inbound: undefined, summary_message_id: undefined, summary_sent_at: undefined }) }); // complete draft, never "summarised"
+  tables.clients[0].pipeline_stage = "recurring";
+  agentReply = "Додали. Ось підсумок на завтра:\n\nНаполеон × 1 — 1 250 грн\nЕклер × 10 — 790 грн\nТовари: 2 040 грн\nДоставка: безкоштовна\nДо сплати: 2 040 грн";
+  await say("давайте ще еклерів", 140);
+  const afterSummary = tables.conversations[0].captured_fields.draft_order;
+  check("a summary written without review_order is still recorded as shown (total 2 040 found in the reply)", afterSummary?.summary_at_inbound !== undefined, JSON.stringify(afterSummary));
+  const { replyProblem: rp } = await import("../lib/agent/postprocess.ts");
+  const text = "Ось підсумок:\nНаполеон × 1 — 1 250 грн\nДо сплати: 2 040 грн";
+  check("   …and a summary shown without review_order is sent back to the model once", /review_order/.test(rp(text, { humanReviewReasons: [], draftComplete: true, toolsUsed: ["update_order_draft"] }) ?? ""));
+  check("   …but not when review_order was used", rp(text, { humanReviewReasons: [], draftComplete: true, toolsUsed: ["update_order_draft", "review_order"] }) === null);
+  // the summary reached the client; mark it sent like the real send path does
+  const { markSummarySent } = await import("../lib/chatOrders.ts");
+  await markSummarySent(db, "conv-1", 777);
+  agentReply = "Дякуємо, прийнято ✅";
+  modelCalls.length = 0;
+  await say("ок", 141);
+  check("«ок» after it approves: the order is placed, no panic, no second summary", tables.orders.length === 1 && tables.orders[0].item_details_uk.approval === "text", JSON.stringify(tables.orders.map((o) => o.item_details_uk?.approval)));
+  check("   …and the agent was told it is placed (so it cannot apologise)", String(modelCalls.find((c) => c.kind === "agent")?.body.system).includes("ЩОЙНО ОФОРМЛЕНО СИСТЕМОЮ"));
+}
+
 // ---- strict mode (the default): even a routine reply to an established client waits for the team
 delete process.env.AGENT_APPROVE_ALL;
 reset("11111111-1111-4111-8111-111111111111", { draft_order: draft() });

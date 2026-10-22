@@ -10,6 +10,7 @@ import {
   loadDraftFor,
   logAgentEvent,
   markSummarySent,
+  noteSummaryShown,
   missingFields,
   placeChatOrder,
   saveDraftFor,
@@ -413,6 +414,12 @@ async function respondToMessage(db: Db, msg: TelegramMessage, text: string, chat
       flags.humanReviewReasons.push("агент написав, що замовлення прийнято, але в системі його немає");
       await logAgentEvent(db, clientRow.id, "safety_net", { action: "held_unbacked_claim" });
     }
+  }
+
+  // A summary the agent wrote without review_order still counts as shown (see noteSummaryShown).
+  if (!flags.summaryShown && (await noteSummaryShown(db, conversation.id, reply, ctx.inboundCount).catch(() => false))) {
+    flags.summaryShown = true;
+    await logAgentEvent(db, clientRow.id, "safety_net", { action: "summary_recorded_without_review_order" });
   }
 
   // "Додали до замовлення" must mean the order really was changed.

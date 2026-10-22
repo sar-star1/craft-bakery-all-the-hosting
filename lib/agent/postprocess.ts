@@ -27,6 +27,11 @@ export function claimsOrderAccepted(text: string): boolean {
   );
 }
 
+// A reply that looks like an order summary (item lines with quantities and a payable total).
+export function looksLikeSummary(text: string): boolean {
+  return /×|\bx\s?\d/i.test(text) && /до\s+сплати|разом|підсумок|товари\s*:/i.test(text);
+}
+
 // The reply says the (already placed) order was changed or added to.
 export function claimsOrderChanged(text: string): boolean {
   return /(?:додали|додав|додала|змінили|змінив|змінила|оновили|оновив|оновила|внесли|вніс|дописали|дописав)[^.!?\n]{0,70}замовленн|замовлення\s+(?:оновлено|змінено|доповнено)/iu.test(text);
@@ -63,8 +68,12 @@ export function replyProblem(
     freeDeliveryShortfall?: number;
     stillShortAfterAdding?: boolean;
     toolsUsed?: string[];
+    draftComplete?: boolean;
   }
 ): string | null {
+  if (flags.draftComplete && looksLikeSummary(text) && !(flags.toolsUsed ?? []).includes("review_order")) {
+    return "Ти показуєш клієнту підсумок замовлення, але не викликав review_order — суми мають приходити лише з нього, а система має знати, що підсумок показано. Виклич review_order і перепиши відповідь з його цифрами (без вибачень і без згадок про систему).";
+  }
   if (claimsOrderChanged(text) && !flags.orderAmended && !flags.orderPlaced && !(flags.toolsUsed ?? []).includes("update_order_draft")) {
     return "Ти пишеш, що додав чи змінив замовлення, але amend_last_order не викликано — у системі нічого не змінилось. Якщо клієнт просить доповнити або змінити вже ОФОРМЛЕНЕ замовлення — виклич amend_last_order і лише тоді скажи, що змінено (з новою сумою з результату). Якщо це нове замовлення — працюй через update_order_draft і не кажи, що змінив оформлене.";
   }
