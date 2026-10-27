@@ -8,6 +8,7 @@ import { requireAdmin } from "@/lib/auth";
 import { markClientOrdered } from "@/lib/orders";
 import { rejectPendingReply as rejectReply, sendPendingReply } from "@/lib/replies";
 import { deleteMessage, editMessage, sendAsTeam, setAgentPaused } from "@/lib/takeover";
+import { tellClientViaAgent } from "@/lib/tellClient";
 import { getBotDeepLink } from "@/lib/telegram";
 import {
   type Attachment,
@@ -459,4 +460,13 @@ export async function editSentClientMessage(messageId: string, text: string): Pr
 export async function deleteSentClientMessage(messageId: string): Promise<TakeoverActionResult> {
   await requireAdmin();
   return asResult(await deleteMessage(createSupabaseServerClient(), messageId));
+}
+
+// "Tell the client this and that": the agent writes the message from the instruction; the team confirms it.
+export async function tellClientViaAgentAction(clientId: string, instruction: string): Promise<TakeoverActionResult & { text?: string; sent?: boolean }> {
+  await requireAdmin();
+  const res = await tellClientViaAgent(createSupabaseServerClient(), { clientId, instruction, by: "дашборд" });
+  revalidatePath(`/clients/${clientId}`);
+  revalidatePath("/pending-replies");
+  return res.ok ? { text: res.text, sent: res.sent } : { error: res.error };
 }

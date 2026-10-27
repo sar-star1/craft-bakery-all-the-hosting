@@ -14,13 +14,19 @@ export interface OrderingRules {
    * silence after a delay stands in for "read, no objection"). 0 turns it off.
    */
   auto_confirm_minutes: number;
+  /**
+   * Seconds the agent waits after a client's message for more of them before it answers, so a
+   * burst of two or three texts gets ONE reply. 0 answers at once.
+   */
+  reply_delay_seconds: number;
 }
 
 export const DEFAULT_ORDERING_RULES: OrderingRules = {
   min_order_total: 1000,
   free_delivery_from: 2000,
   delivery_fee: 250,
-  auto_confirm_minutes: 120,
+  auto_confirm_minutes: 30,
+  reply_delay_seconds: 30,
 };
 
 // Kept for existing imports.

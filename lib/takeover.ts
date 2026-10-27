@@ -49,7 +49,13 @@ async function lastClientMessage(db: Db, clientId: string): Promise<string | nul
 
 // A message written by a person (dashboard composer, or a reply in the staff group).
 // Sending one puts the agent on pause for this client: a person is now in the conversation.
-export async function sendAsTeam(db: Db, clientId: string, rawText: string, by = "дашборд"): Promise<TakeoverResult> {
+export async function sendAsTeam(
+  db: Db,
+  clientId: string,
+  rawText: string,
+  by = "дашборд",
+  opts: { pause?: boolean } = {}
+): Promise<TakeoverResult> {
   const text = rawText.trim();
   if (!text) return { ok: false, error: "Empty message." };
   const { data: client } = await db.from("clients").select("id, telegram_chat_id, agent_paused").eq("id", clientId).maybeSingle();
@@ -76,7 +82,7 @@ export async function sendAsTeam(db: Db, clientId: string, rawText: string, by =
     sent_by: "team",
   });
   await db.from("clients").update({ last_contact_at: new Date().toISOString() }).eq("id", clientId);
-  if (!client.agent_paused) await setAgentPaused(db, clientId, true, by);
+  if (opts.pause !== false && !client.agent_paused) await setAgentPaused(db, clientId, true, by);
   if (prior) await recordExample(db, { clientMessage: prior, reply: text, quality: "written" }).catch(() => {});
   refresh(clientId);
   return { ok: true };

@@ -32,6 +32,7 @@ export async function getOrderingRules(db: Db): Promise<OrderingRules> {
     free_delivery_from: num(raw.free_delivery_from, DEFAULT_ORDERING_RULES.free_delivery_from),
     delivery_fee: num(raw.delivery_fee, DEFAULT_ORDERING_RULES.delivery_fee),
     auto_confirm_minutes: num(raw.auto_confirm_minutes, DEFAULT_ORDERING_RULES.auto_confirm_minutes),
+    reply_delay_seconds: num(raw.reply_delay_seconds, DEFAULT_ORDERING_RULES.reply_delay_seconds),
   };
 }
 

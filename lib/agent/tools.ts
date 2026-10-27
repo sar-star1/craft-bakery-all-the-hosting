@@ -3,6 +3,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { getStorefrontLink } from "@/lib/clientToken";
 import type { createSupabaseServerClient } from "@/lib/supabase/server";
 import { ALLOWED_REACTIONS, notifyAdmin } from "@/lib/telegram";
+import { tellButtons } from "@/lib/adminAlerts";
 import { getKnowledge } from "./memory";
 import { ORDER_TOOLS, isOrderTool, runOrderTool } from "./orderTools";
 import type { PipelineStage } from "@/lib/types";
@@ -293,7 +294,8 @@ export async function runTool(name: string, input: unknown, ctx: ToolContext): P
       });
       const base = process.env.SITE_URL?.replace(/\/$/, "");
       await notifyAdmin(
-        `Масове замовлення: ${client.business_name}\n«${String(args.matched_text ?? "")}»${base ? `\n${base}/clients/${client.id}` : ""}`
+        `Масове замовлення: ${client.business_name}\n«${String(args.matched_text ?? "")}»${base ? `\n${base}/clients/${client.id}` : ""}`,
+        { buttons: [tellButtons(client.id)] }
       );
       return "Flagged. The admin has been notified; a human will handle the reply.";
     }

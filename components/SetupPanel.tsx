@@ -322,6 +322,7 @@ function OrderingRulesForm({ initial }: { initial: OrderingRules }) {
         {field("free_delivery_from", "Безкоштовна доставка від, ₴")}
         {field("delivery_fee", "Доставка нижче порогу, ₴")}
         {field("auto_confirm_minutes", "Оформлювати замовлення, якщо клієнт мовчить, через (хв; 0 — вимкнути)")}
+        {field("reply_delay_seconds", "Чекати нових повідомлень клієнта перед відповіддю (сек; 0 — відповідати одразу)")}
       </div>
       <button
         disabled={pending}

@@ -11,6 +11,8 @@ import { answerCallbackQuery, editTelegramMessage, isStaffChat, notifyAdmin } fr
 import { nextStatus, type OrderStatus } from "@/lib/types";
 import { rejectPendingReply, sendPendingReply } from "@/lib/replies";
 import { announceTakeover, sendAsTeam, setAgentPaused } from "@/lib/takeover";
+import { tellClientViaAgent } from "@/lib/tellClient";
+import { tellButtons } from "@/lib/adminAlerts";
 import type { TelegramUpdate } from "@/lib/agent/run";
 
 const STATUS_LABEL: Record<OrderStatus, string> = {
@@ -70,16 +72,31 @@ async function handleButton(
     const result = reply[1] === "ap" ? await sendPendingReply(reply[2]) : await rejectPendingReply(reply[2]);
     if (result.ok) {
       await answerCallbackQuery(queryId, reply[1] === "ap" ? "Надіслано" : "Відхилено");
+      const { data: handled } = await createSupabaseServerClient().from("pending_replies").select("client_id").eq("id", reply[2]).maybeSingle();
       await editTelegramMessage(
         chat,
         messageId,
-        `${stripHint(original)}\n\n${reply[1] === "ap" ? "✅ Надіслано клієнту" : "🚫 Відхилено"} · ${actor}`
+        `${stripHint(original)}\n\n${reply[1] === "ap" ? "✅ Надіслано клієнту" : "🚫 Відхилено"} · ${actor}`,
+        handled?.client_id ? [tellButtons(handled.client_id as string)] : []
       );
     } else {
       // "Already handled" means another admin got there first; their edit
       // already updated the message, so leave it alone.
       await answerCallbackQuery(queryId, result.alreadyHandled ? "Вже оброблено" : result.error);
     }
+    return;
+  }
+
+  const tell = data.match(/^tl:([0-9a-f-]{36})$/);
+  if (tell) {
+    const db = createSupabaseServerClient();
+    const { data: c } = await db.from("clients").select("business_name").eq("id", tell[1]).maybeSingle();
+    await answerCallbackQuery(queryId, "Напишіть, що передати");
+    const prompt = await notifyAdmin(
+      `📨 Що передати клієнту ${c?.business_name ?? ""}?\n↩️ Відповідайте на це повідомлення своїми словами — агент сам складе повідомлення, а ви підтвердите. (Починайте зі «!», щоб надіслати текст дослівно.)`,
+      { kind: "message" }
+    );
+    if (prompt.ok && prompt.messageId) await db.from("relayed_messages").insert({ admin_message_id: prompt.messageId, client_id: tell[1], kind: "tell" });
     return;
   }
 
@@ -148,7 +165,21 @@ async function handleReplyToDraft(msg: NonNullable<TelegramUpdate["message"]>) {
   if (!text) return;
 
   // A reply to a message relayed from a client we are talking to ourselves: goes to the client as is.
-  const { data: relayed } = await db.from("relayed_messages").select("client_id").eq("admin_message_id", target.message_id).maybeSingle();
+  const { data: relayed } = await db.from("relayed_messages").select("client_id, kind").eq("admin_message_id", target.message_id).maybeSingle();
+  if (relayed && relayed.kind === "tell") {
+    const reply = { replyTo: msg.message_id, threadId: msg.message_thread_id };
+    if (text.startsWith("!")) {
+      const res = await sendAsTeam(db, relayed.client_id as string, text.replace(/^!+\s*/, ""), actor, { pause: false });
+      await notifyAdmin(res.ok ? "✅ Надіслано клієнту" : `Не вдалося надіслати: ${res.error}`, reply);
+      return;
+    }
+    const res = await tellClientViaAgent(db, { clientId: relayed.client_id as string, instruction: text, by: actor });
+    await notifyAdmin(
+      res.ok ? (res.sent ? "✅ Агент склав і надіслав повідомлення клієнту." : "✍️ Агент склав повідомлення — чернетка вище, підтвердіть ✅.") : `Не вдалося: ${res.error}`,
+      reply
+    );
+    return;
+  }
   if (relayed) {
     const res = await sendAsTeam(db, relayed.client_id as string, text.replace(/^!+\s*/, ""), actor);
     await notifyAdmin(res.ok ? "✅ Надіслано клієнту" : `Не вдалося надіслати: ${res.error}`, { replyTo: msg.message_id, threadId: msg.message_thread_id });
@@ -163,11 +194,24 @@ async function handleReplyToDraft(msg: NonNullable<TelegramUpdate["message"]>) {
   if (!draft) return;
   const pending = draft.status === "awaiting_approval";
 
+  // "/tell …" or "→ …": the agent writes a NEW message to this client from the instruction.
+  const instruction = text.match(/^(?:\/tell(?:@\w+)?|→)\s*([\s\S]+)$/i)?.[1]?.trim();
+  if (instruction) {
+    const res = await tellClientViaAgent(db, { clientId: draft.client_id as string, instruction, by: actor });
+    await notifyAdmin(
+      res.ok ? (res.sent ? "✅ Агент склав і надіслав повідомлення клієнту." : "✍️ Агент склав повідомлення — чернетка вище, підтвердіть ✅.") : `Не вдалося: ${res.error}`,
+      { replyTo: msg.message_id, threadId: msg.message_thread_id }
+    );
+    return;
+  }
+
   if (text.startsWith("!")) {
     const own = text.replace(/^!+\s*/, "");
     if (!own) return;
     if (!pending) {
-      await notifyAdmin("Ця чернетка вже оброблена — власний текст не надіслано.", { replyTo: msg.message_id, threadId: msg.message_thread_id });
+      // The draft was already sent or rejected: this is a new message to the same client, verbatim.
+      const res = await sendAsTeam(db, draft.client_id as string, own, actor, { pause: false });
+      await notifyAdmin(res.ok ? "✅ Надіслано клієнту окремим повідомленням." : `Не вдалося надіслати: ${res.error}`, { replyTo: msg.message_id, threadId: msg.message_thread_id });
       return;
     }
     const result = await sendPendingReply(draft.id as string, { text: own });

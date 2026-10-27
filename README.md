@@ -102,6 +102,21 @@ The group is actionable, so day-to-day approvals don't need the dashboard:
 Re-register the webhook after upgrading (`scripts/telegram-setup.mjs webhook …`)
 so Telegram also delivers button presses.
 
+## Bursts of messages, remembered details, "tell the client…"
+
+- **One answer to a burst.** The agent waits until the client has been quiet for `reply_delay_seconds`
+  (default 30, Settings) and then answers all their latest texts at once; earlier texts' runs simply
+  stop when a newer one has arrived. The approval check also reads the whole burst.
+- **Returning clients aren't asked for their details.** Venue name, ФОП, address, payment and phone
+  are filled into the order from what we remember; the summary shows them and the client corrects
+  them there if needed. Only details we never had are asked for.
+- **📨 Передати клієнту.** Alerts in the group (drafts, team questions, nudges, mass-order flags) keep a
+  **📨 Передати клієнту** button, even after the draft was sent or rejected. Press it, reply to the
+  prompt in your own words, and the agent writes the message (waits for ✅ in strict mode; sent at
+  once otherwise) — without taking the conversation over. Same on the client page ("Скласти
+  повідомлення"). Also: reply `/tell …` or `→ …` to any alert, or `!text` to an already-handled
+  alert to send your exact text as a new message.
+
 ## Taking over a conversation, and fixing what was sent
 
 - **Перебрати розмову** (client page, or 🙋 on any draft alert in the group) pauses the
@@ -154,7 +169,7 @@ acknowledgements are recognised by a word list (no model call); everything else 
 the model as ACK / MORE (approval + something new) / CHANGE, and if the model is unavailable only
 clear change words or a question count as "change". A positive reaction on the summary — or on any
 message of ours sent after it — approves too. If the client says nothing, the order is placed
-after `auto_confirm_minutes` (default **120**, Settings; Telegram doesn't tell bots whether a
+after `auto_confirm_minutes` (default **30**, Settings; Telegram doesn't tell bots whether a
 message was read). Silence is checked on every incoming update, every dashboard visit and the
 daily cron; for an on-time check point a free external pinger (cron-job.org, every 10–15 min) at
 `/api/cron/sweep` with the header `Authorization: Bearer <CRON_SECRET>`.

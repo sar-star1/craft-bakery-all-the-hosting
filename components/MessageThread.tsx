@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { deleteSentClientMessage, editSentClientMessage, sendTeamMessage, setClientAgentPaused } from "@/app/actions";
+import { deleteSentClientMessage, editSentClientMessage, sendTeamMessage, setClientAgentPaused, tellClientViaAgentAction } from "@/app/actions";
 import type { Lang } from "@/lib/i18n";
 import type { Message } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils";
@@ -26,6 +26,8 @@ export default function MessageThread({
   const router = useRouter();
   const [paused, setPaused] = useState(initialPaused);
   const [draft, setDraft] = useState("");
+  const [tell, setTell] = useState("");
+  const [tellNote, setTellNote] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const [error, setError] = useState<string | undefined>();
@@ -55,6 +57,18 @@ export default function MessageThread({
       setDraft("");
       setPaused(true);
     });
+  };
+  const sendTell = () => {
+    const instruction = tell.trim();
+    if (!instruction) return;
+    run(
+      async () => {
+        const r = await tellClientViaAgentAction(clientId, instruction);
+        if (!r.error) setTellNote(r.sent ? (uk ? "Надіслано клієнту." : "Sent to the client.") : uk ? `Агент склав повідомлення — чернетка нижче, підтвердіть ✅: «${r.text}»` : `Drafted — confirm it below: “${r.text}”`);
+        return r;
+      },
+      () => setTell("")
+    );
   };
   const saveEdit = (id: string) => run(() => editSentClientMessage(id, editText), () => setEditing(null));
   const remove = (id: string) => {
@@ -170,6 +184,29 @@ export default function MessageThread({
           </button>
         </div>
         {error && <p className="text-[12px] text-red-600 mt-1">{error}</p>}
+      </div>
+
+      <div className="mt-4 border-t border-stone-200 pt-3">
+        <p className="text-[12px] text-stone-500 mb-1">
+          {uk ? "📨 Або скажіть агентові, що передати — він сам складе повідомлення, агент лишається в розмові:" : "📨 Or tell the agent what to pass on — it writes the message and stays in the conversation:"}
+        </p>
+        <textarea
+          value={tell}
+          onChange={(e) => setTell(e.target.value)}
+          rows={2}
+          placeholder={uk ? "Напр.: скажи, що безглютенові робимо під замовлення за добу" : "e.g. tell them gluten-free needs a day's notice"}
+          className="w-full border border-stone-200 rounded px-3 py-2 text-sm bg-white"
+        />
+        <div className="flex items-center justify-between gap-3 mt-1">
+          <p className="text-[11px] text-stone-400">{tellNote ?? (uk ? "Чернетка з'явиться тут і в групі — надсилається після ✅." : "The draft appears here and in the group — sent after ✅.")}</p>
+          <button
+            onClick={sendTell}
+            disabled={busy || !tell.trim()}
+            className="text-[12px] border border-stone-300 bg-white text-stone-800 px-3 py-1.5 rounded hover:bg-stone-50 disabled:opacity-40 shrink-0"
+          >
+            {uk ? "Скласти повідомлення" : "Draft message"}
+          </button>
+        </div>
       </div>
     </div>
   );

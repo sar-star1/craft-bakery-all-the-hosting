@@ -118,6 +118,7 @@ export async function saveOrderingRules(rules: OrderingRules): Promise<SetupActi
     free_delivery_from: clean(rules.free_delivery_from),
     delivery_fee: clean(rules.delivery_fee),
     auto_confirm_minutes: clean(rules.auto_confirm_minutes),
+    reply_delay_seconds: clean(rules.reply_delay_seconds),
   };
   if (Object.values(next).some((v) => v === null)) return { ok: false, message: "Введіть невід'ємні числа." };
   const db = createSupabaseServerClient();
