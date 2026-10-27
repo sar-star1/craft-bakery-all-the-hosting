@@ -3,7 +3,8 @@ import { processTelegramUpdate, type TelegramUpdate } from "@/lib/agent/run";
 
 // The agent can take a while (tool calls + model); after() lets us answer
 // Telegram immediately — so it never retries — and keep working.
-export const maxDuration = 60;
+// 300 s: the agent first waits for the client to finish typing (reply_delay_seconds), then thinks.
+export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {

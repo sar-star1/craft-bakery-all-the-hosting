@@ -11,6 +11,13 @@ export const REPLY_TYPE_LABEL: Record<string, string> = {
   seasonal_offer: "Сезонна пропозиція",
 };
 
+// "📨 Передати клієнту": tell the agent what to say to this client (it finds the words), without
+// taking the conversation over. "🙋 Перебрати розмову": write yourself, agent silent.
+export const tellButtons = (clientId: string): InlineButton[] => [
+  { text: "📨 Передати клієнту", callback_data: `tl:${clientId}` },
+  { text: "🙋 Перебрати розмову", callback_data: `tk:${clientId}` },
+];
+
 const siteBase = () => process.env.SITE_URL?.replace(/\/$/, "");
 
 export interface DraftAlert {
@@ -35,7 +42,7 @@ export function buildDraftAlert(draft: DraftAlert): { text: string; buttons: Inl
       { text: "🚫 Відхилити", callback_data: `rj:${draft.id}` },
     ],
   ];
-  buttons.push([{ text: "🙋 Перебрати розмову", callback_data: `tk:${draft.clientId}` }]);
+  buttons.push(tellButtons(draft.clientId));
   if (base) buttons.push([{ text: "Відкрити в дашборді", url: `${base}/clients/${draft.clientId}` }]);
 
   const lines = [

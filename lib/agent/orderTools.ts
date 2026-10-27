@@ -148,6 +148,19 @@ async function savedProfile(ctx: ToolContext): Promise<ClientProfile & { busines
   return getClientProfile(ctx.supabase, ctx.client.id);
 }
 
+// A returning client is not asked for their details again: whatever the order still lacks is
+// taken from what we remember (the summary shows it, so they can correct it there). Only details
+// they really gave before are used — never the Telegram display name as a venue name.
+async function fillFromProfile(ctx: ToolContext, draft: OrderDraft) {
+  const p = await savedProfile(ctx);
+  // The venue name of a client who has ordered before is stored as their business_name.
+  draft.venue_name ??= p.venue_name ?? (p.fop || p.delivery_address ? p.business_name : undefined);
+  draft.fop ??= p.fop;
+  draft.address ??= p.delivery_address;
+  draft.payment_method ??= p.payment_method;
+  draft.phone ??= p.phone;
+}
+
 const trimmed = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) || undefined : undefined);
 
 export async function runOrderTool(name: string, args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
@@ -268,6 +281,7 @@ export async function runOrderTool(name: string, args: Record<string, unknown>, 
         const d = args.requested_date.trim();
         draft.requested_date = /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(d)) ? d : undefined;
       }
+      await fillFromProfile(ctx, draft);
       // anything changed → the summary must be shown again and approved again
       draft.summary_at_inbound = undefined;
       draft.summary_message_id = undefined;
@@ -286,6 +300,7 @@ export async function runOrderTool(name: string, args: Record<string, unknown>, 
 
     case "review_order": {
       const draft = await loadDraft(ctx);
+      await fillFromProfile(ctx, draft);
       const missing = missingFields(draft);
       if (draft.lines.length === 0) return json({ empty: true, missing });
       const priced = await priceOrderLines(supabase, draft.lines.map((l) => ({ item_id: l.item_id, qty: l.qty })));

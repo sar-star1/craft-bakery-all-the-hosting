@@ -140,14 +140,14 @@ tables.messages.push({ id: "m6", client_id: "11111111-1111-4111-8111-11111111111
 r = await co.handleReactionApproval(db, { chatId: "111", messageId: 40, emojis: ["👍"] });
 check("a reaction on something we said BEFORE the summary approves nothing", r === false && tables.orders.length === 0);
 
-// ---- 9. silence: a couple of hours by default
-reset("11111111-1111-4111-8111-111111111111", { draft_order: draft({ summary_sent_at: minutesAgo(90) }) });
+// ---- 9. silence: 30 minutes by default
+reset("11111111-1111-4111-8111-111111111111", { draft_order: draft({ summary_sent_at: minutesAgo(20) }) });
 tables.messages = tables.messages.map((m) => ({ ...m, created_at: minutesAgo(200) })); // the client has been silent since before the summary
 let n = await co.sweepPendingOrders(db);
-check("after 90 min of silence nothing happens yet (default is 2 hours)", n === 0 && tables.orders.length === 0);
-tables.conversations[0].captured_fields = { draft_order: draft({ summary_sent_at: minutesAgo(130) }) };
+check("after 20 min of silence nothing happens yet (default is 30 minutes)", n === 0 && tables.orders.length === 0);
+tables.conversations[0].captured_fields = { draft_order: draft({ summary_sent_at: minutesAgo(40) }) };
 n = await co.sweepPendingOrders(db);
-check("after 130 min of silence the order is placed automatically", n === 1 && tables.orders[0]?.item_details_uk?.approval === "implicit");
+check("after 40 min of silence the order is placed automatically", n === 1 && tables.orders[0]?.item_details_uk?.approval === "implicit");
 
 // ---- 10. the agent can't claim it changed an order it did not change
 const { replyProblem, claimsOrderChanged } = await import("../lib/agent/postprocess.ts");

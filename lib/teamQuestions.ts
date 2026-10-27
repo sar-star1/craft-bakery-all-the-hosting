@@ -1,6 +1,7 @@
 import "server-only";
 import type { createSupabaseServerClient } from "@/lib/supabase/server";
 import { notifyAdmin } from "@/lib/telegram";
+import { tellButtons } from "@/lib/adminAlerts";
 
 type Db = ReturnType<typeof createSupabaseServerClient>;
 
@@ -33,7 +34,7 @@ export async function nudgeUnansweredQuestions(db: Db): Promise<number> {
     const base = process.env.SITE_URL?.replace(/\/$/, "");
     await notifyAdmin(
       `⏰ ${client?.business_name ?? "Клієнт"} чекає на відповідь команди вже понад ${QUESTION_NUDGE_MINUTES} хв.\n❓ ${String(q.team_question).slice(0, 400)}${base ? `\n${base}/clients/${q.client_id}` : ""}`,
-      { replyTo: (q.admin_message_id as number | null) ?? undefined, kind: "message" }
+      { replyTo: (q.admin_message_id as number | null) ?? undefined, kind: "message", buttons: [tellButtons(q.client_id as string)] }
     ).catch(() => {});
     nudged++;
   }

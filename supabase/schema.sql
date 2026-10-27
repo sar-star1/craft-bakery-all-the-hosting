@@ -261,7 +261,7 @@ on conflict (id) do nothing;
 -- Ordering numbers the team edits in Settings: smallest order, free-delivery
 -- threshold and the fee below it (all UAH).
 insert into site_content (key, content_json) values
-  ('ordering_rules', '{"min_order_total": 1000, "free_delivery_from": 2000, "delivery_fee": 250, "auto_confirm_minutes": 120}'::jsonb),
+  ('ordering_rules', '{"min_order_total": 1000, "free_delivery_from": 2000, "delivery_fee": 250, "auto_confirm_minutes": 30, "reply_delay_seconds": 30}'::jsonb),
   ('telegram_routing', '{}'::jsonb)   -- where staff alerts go: orders topic/chat (Settings)
 on conflict (key) do nothing;
 
@@ -315,6 +315,7 @@ alter table agent_events enable row level security;
 create table relayed_messages (
   admin_message_id bigint primary key,
   client_id uuid references clients(id) on delete cascade,
+  kind text not null default 'relay',  -- 'relay': a reply goes to the client as is · 'tell': a reply is an instruction for the agent
   created_at timestamptz default now()
 );
 alter table relayed_messages enable row level security;

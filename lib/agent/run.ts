@@ -22,6 +22,7 @@ import { buildOrderState, lastChatOrderAt, type OrderStateInput } from "./orderS
 import { notifyAdmin, sendTelegramMessage, sendTypingAction, setMessageReaction, startPayloadToClientId } from "@/lib/telegram";
 import type { ClientSource, PipelineStage } from "@/lib/types";
 import { AGENT_MODEL, getAnthropic, isAnthropicConfigured } from "./anthropic";
+import { getOrderingRules } from "@/lib/orders";
 import { buildHistory, type HistoryRow } from "./history";
 import { withClientLock } from "./lock";
 import { getActiveGuidelines } from "./guidelines";
@@ -295,6 +296,23 @@ async function handleMessage(msg: TelegramMessage, text: string) {
       .eq("id", clientRow.id),
   ]);
 
+  // Clients often send two or three short texts in a row. Wait until they have been quiet for
+  // reply_delay_seconds; only the LAST message's run goes on and answers all of them at once.
+  if (!clientRow.agent_paused) {
+    const envDelay = process.env.AGENT_REPLY_DELAY_SECONDS;
+    const delay = envDelay !== undefined ? Number(envDelay) : (await getOrderingRules(db)).reply_delay_seconds;
+    if (delay > 0) {
+      await new Promise((r) => setTimeout(r, delay * 1000));
+      const { count: newer } = await db
+        .from("messages")
+        .select("id", { count: "exact", head: true })
+        .eq("client_id", clientRow.id)
+        .eq("direction", "in")
+        .gt("telegram_message_id", msg.message_id);
+      if ((newer ?? 0) > 0) return;
+    }
+  }
+
   // One run per client at a time: a second quick message waits for the first reply.
   await withClientLock(db, clientRow.id, () => respondToMessage(db, msg, text, chatId, clientRow.id));
 }
@@ -348,11 +366,24 @@ async function respondToMessage(db: Db, msg: TelegramMessage, text: string, chat
   // objects to it is left to the agent.
   let justPlaced: OrderStateInput["justPlaced"] = null;
   let changing = false;
+  // Everything the client wrote since our last message (a burst of texts is judged as a whole).
+  const { data: lastOut } = await db
+    .from("messages")
+    .select("created_at")
+    .eq("client_id", clientRow.id)
+    .eq("direction", "out")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const { data: unanswered } = await (lastOut?.created_at
+    ? db.from("messages").select("text").eq("client_id", clientRow.id).eq("direction", "in").gt("created_at", lastOut.created_at as string).order("created_at", { ascending: true }).limit(10)
+    : db.from("messages").select("text").eq("client_id", clientRow.id).eq("direction", "in").order("created_at", { ascending: true }).limit(10));
+  const unansweredText = (unanswered ?? []).map((m) => String(m.text)).join("\n").trim() || text;
   try {
     const approval = await approveSummaryByMessage(db, {
       client: { id: clientRow.id, business_name: clientRow.business_name },
       conversationId: conversation.id,
-      text,
+      text: unansweredText,
       inboundCount: ctx.inboundCount,
     });
     if (approval?.verdict === "change") changing = true;
