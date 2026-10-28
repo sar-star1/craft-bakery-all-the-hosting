@@ -204,6 +204,17 @@ link stays available for photos and browsing.
 The seasonal-offer form accepts up to 5 files (images, PDF, Word/Excel/
 PowerPoint, 4 MB each). They are sent after the text of each approved message.
 
+## Cost: a cheap model first, the strong one only when needed
+
+Every message is answered by a **cheap model** (`claude-haiku-5-5`, `ANTHROPIC_MODEL_FAST`); the **strong model** (`claude-sonnet-5-5`, `ANTHROPIC_MODEL`) takes over in two ways (`lib/agent/routing.ts`, `runAgentLoop` in `lib/agent/run.ts`):
+
+- **Starts strong** when the client's message looks hard: a complaint or problem, a discount / deferred payment / special terms, allergens or ingredients, a wedding or other big event, custom products, a request for a person, large quantities, a very long message or long item list.
+- **Moves up mid-answer** when the cheap model's work doesn't hold up: its reply broke a reply rule (promised to clarify without asking the team, missed the free-delivery shortfall, summary without `review_order`, …), it quoted an **amount that appears nowhere** in what it was given (tool results, the conversation, the rules), it came back empty or errored, or it needed more than 5 tool rounds. The strong model continues the same conversation with all tool results so far, so nothing is done twice.
+
+The small one-word / one-message jobs (is this reply an approval?, write what the team said to tell the client, redo a draft after feedback, reminders) always run on the cheap model; rare one-off jobs (teaching a rule, importing a menu) on the strong one. The long stable part of the agent's instructions (rules, examples) is sent with prompt caching, so repeat reads cost a fraction.
+
+Settings → AI shows both models and how the last 7 days of answers split (cheap only / moved up / started strong); the practice chat names the model that answered. `AGENT_MODEL_ROUTING=off` sends everything to the strong model again.
+
 ## Approval policy (`lib/agent/policy.ts`)
 
 **Strict mode (default for now):** every reply the agent writes waits in the staff group for ✅

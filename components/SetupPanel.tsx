@@ -27,6 +27,9 @@ import LangToggle from "./LangToggle";
 export interface SetupStatus {
   env: { name: string; secret: boolean; needed: string; set: boolean }[];
   model: string;
+  // The cheap model messages start on (null when routing is off and everything runs on `model`).
+  fastModel: string | null;
+  modelUse: { turns: number; cheapOnly: number; startedStrong: number; escalated: number } | null;
   siteUrl: string | null;
   supabase:
     | { ok: true; categories: number; items: number; clients: number; capacityRules: number }
@@ -530,8 +533,23 @@ export default function SetupPanel({ status }: { status: SetupStatus }) {
         <section className="bg-white rounded-md border border-stone-200 p-4 mb-5">
           <h2 className="font-serif text-lg mb-2">6. AI-агент</h2>
           <Row ok={envSet("ANTHROPIC_API_KEY")}>
-            Модель: <code className="text-[12px]">{status.model}</code>
+            {status.fastModel ? (
+              <>
+                Дешева модель (більшість повідомлень): <code className="text-[12px]">{status.fastModel}</code> · сильна (складні випадки):{" "}
+                <code className="text-[12px]">{status.model}</code>
+              </>
+            ) : (
+              <>
+                Модель: <code className="text-[12px]">{status.model}</code>
+              </>
+            )}
           </Row>
+          {status.modelUse && (
+            <p className="text-[12px] text-stone-500 mb-2">
+              За 7 днів: {status.modelUse.turns} відповідей агента — {status.modelUse.cheapOnly} повністю на дешевій моделі,{" "}
+              {status.modelUse.escalated} перейшли на сильну посеред відповіді, {status.modelUse.startedStrong} одразу на сильній (складне повідомлення).
+            </p>
+          )}
           <ActionButton label="Перевірити AI" action={testAnthropic} />
         </section>
       </main>

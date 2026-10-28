@@ -1,6 +1,6 @@
 import "server-only";
 import { getStorefrontLink } from "@/lib/clientToken";
-import { AGENT_MODEL, getAnthropic } from "./anthropic";
+import { FAST_MODEL, getAnthropic } from "./anthropic";
 import { guidelinesBlock } from "./guidelines";
 
 export type OutboundKind = "weekly_reminder" | "remarketing" | "seasonal_offer";
@@ -46,7 +46,7 @@ export async function draftOutbound(input: {
   if (!link) return null;
 
   const response = await getAnthropic().messages.create({
-    model: AGENT_MODEL,
+    model: FAST_MODEL,
     max_tokens: 2000,
     system: `Ти пишеш одне коротке повідомлення в Telegram від пекарні Peremoga Bakery для B2B-клієнта. Українською, тепло й по-діловому, 2–4 речення, звичайний текст без markdown. ${KIND_INSTRUCTIONS[input.kind]}
 

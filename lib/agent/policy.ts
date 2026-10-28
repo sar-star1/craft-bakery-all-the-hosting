@@ -1,5 +1,7 @@
 import type { PipelineStage } from "@/lib/types";
 
+import type { ModelRoute } from "./routing";
+
 export interface TurnFlags {
   humanReviewReasons: string[];
   massOrderFlagged: boolean;
@@ -22,6 +24,8 @@ export interface TurnFlags {
   // and whether the client already added things after being told.
   freeDeliveryShortfall?: number;
   stillShortAfterAdding?: boolean;
+  // Which model answered this turn, and why (cheap model first; see routing.ts).
+  route?: ModelRoute;
 }
 
 // Strict mode: EVERY reply the agent writes waits in the staff group for a person's ✅, however

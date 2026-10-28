@@ -1,7 +1,7 @@
 import "server-only";
 import type { createSupabaseServerClient } from "@/lib/supabase/server";
 import { announceDraft } from "@/lib/adminAlerts";
-import { isAnthropicConfigured, AGENT_MODEL, getAnthropic } from "@/lib/agent/anthropic";
+import { isAnthropicConfigured, FAST_MODEL, getAnthropic } from "@/lib/agent/anthropic";
 import { approveAllReplies } from "@/lib/agent/policy";
 import { getActiveGuidelines, guidelinesBlock } from "@/lib/agent/guidelines";
 import { sendPendingReply } from "@/lib/replies";
@@ -24,7 +24,7 @@ export async function composeForClient(db: Db, clientId: string, instruction: st
     .map((m) => `${m.direction === "in" ? "Клієнт" : "Ми"}: ${String(m.text).slice(0, 500)}`)
     .join("\n");
   const response = await getAnthropic().messages.create({
-    model: AGENT_MODEL,
+    model: FAST_MODEL,
     max_tokens: 700,
     system: `Ти асистент пекарні Peremoga Bakery і пишеш клієнтові в Telegram. Команда дала вказівку, що йому передати. Напиши коротке тепле повідомлення від імені пекарні («ми»), яке передає саме те, що сказала команда.
 - Не додавай жодних фактів, цін, дат чи обіцянок, яких немає у вказівці.

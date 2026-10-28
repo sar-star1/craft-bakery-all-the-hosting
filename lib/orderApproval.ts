@@ -1,6 +1,6 @@
 import "server-only";
 import type { createSupabaseServerClient } from "@/lib/supabase/server";
-import { AGENT_MODEL, getAnthropic, isAnthropicConfigured } from "@/lib/agent/anthropic";
+import { FAST_MODEL, getAnthropic, isAnthropicConfigured } from "@/lib/agent/anthropic";
 import {
   isSummarized,
   loadDraftFor,
@@ -30,7 +30,7 @@ export async function classifySummaryReply(text: string, summary: string): Promi
   return classifyVerdict(text, async () => {
     if (!isAnthropicConfigured()) return null;
     const res = await getAnthropic().messages.create({
-      model: AGENT_MODEL,
+      model: FAST_MODEL,
       max_tokens: 40,
       system: SYSTEM,
       messages: [{ role: "user", content: `ПІДСУМОК:\n${summary.slice(0, 1500)}\n\nПОВІДОМЛЕННЯ КЛІЄНТА:\n${text.slice(0, 800)}` }],

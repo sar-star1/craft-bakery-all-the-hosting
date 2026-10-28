@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { AGENT_MODEL, getAnthropic, isAnthropicConfigured } from "@/lib/agent/anthropic";
+import { AGENT_MODEL, FAST_MODEL, getAnthropic, isAnthropicConfigured } from "@/lib/agent/anthropic";
 import { addGuideline } from "@/lib/agent/guidelines";
 import { addKnowledge } from "@/lib/agent/memory";
 import { teachFromText } from "@/lib/agent/teach";
@@ -47,17 +47,21 @@ export async function sendAdminTestMessage(): Promise<SetupActionResult> {
 export async function testAnthropic(): Promise<SetupActionResult> {
   await requireAdmin();
   if (!isAnthropicConfigured()) return { ok: false, message: "ANTHROPIC_API_KEY не задано." };
-  try {
-    const response = await getAnthropic().messages.create({
-      model: AGENT_MODEL,
-      max_tokens: 20,
-      messages: [{ role: "user", content: "Reply with the single word OK." }],
-    });
-    const text = response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("").trim();
-    return { ok: true, message: `Модель ${AGENT_MODEL} відповідає: «${text}»` };
-  } catch (err) {
-    return { ok: false, message: `Модель ${AGENT_MODEL}: ${err instanceof Error ? err.message : String(err)}` };
-  }
+  const ping = async (model: string) => {
+    try {
+      const response = await getAnthropic().messages.create({
+        model,
+        max_tokens: 20,
+        messages: [{ role: "user", content: "Reply with the single word OK." }],
+      });
+      const text = response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("").trim();
+      return { ok: true, line: `${model} відповідає: «${text}»` };
+    } catch (err) {
+      return { ok: false, line: `${model}: ${err instanceof Error ? err.message : String(err)}` };
+    }
+  };
+  const results = await Promise.all([ping(FAST_MODEL), ...(FAST_MODEL === AGENT_MODEL ? [] : [ping(AGENT_MODEL)])]);
+  return { ok: results.every((r) => r.ok), message: results.map((r) => r.line).join(" · ") };
 }
 
 // Standing rules the agent follows in every reply (see lib/agent/guidelines.ts).
