@@ -33,6 +33,15 @@ const HARD: [string, RegExp][] = [
   ["великі обсяги", /\d{3,}\s*(шт|штук|порц|кг|кілограм|коробк|упаков)/i],
 ];
 
+// Moments of the order flow where a slip costs money or an order, whatever the client wrote.
+// These are facts the code already knows, so they don't depend on guessing from the wording.
+export function stateReasons(state: { changing?: boolean; justPlaced?: { mode: string } | null }): string[] {
+  const why: string[] = [];
+  if (state.changing) why.push("клієнт змінює підсумок замовлення");
+  if (state.justPlaced?.mode === "more") why.push("клієнт підтвердив замовлення й написав ще щось");
+  return why;
+}
+
 export function hardReasons(text: string): string[] {
   const reasons = HARD.filter(([, re]) => re.test(text)).map(([why]) => why);
   if (text.length > 700) reasons.push("довге повідомлення");

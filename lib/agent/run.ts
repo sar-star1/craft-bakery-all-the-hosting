@@ -22,7 +22,7 @@ import { buildOrderState, lastChatOrderAt, type OrderStateInput } from "./orderS
 import { notifyAdmin, sendTelegramMessage, sendTypingAction, setMessageReaction, startPayloadToClientId } from "@/lib/telegram";
 import type { ClientSource, PipelineStage } from "@/lib/types";
 import { AGENT_MODEL, FAST_MODEL, getAnthropic, isAnthropicConfigured, modelRoutingOn } from "./anthropic";
-import { hardReasons, newRoute, sourceText, systemBlocks, trailingClientText, unsourcedAmounts, type ModelRoute } from "./routing";
+import { hardReasons, newRoute, stateReasons, sourceText, systemBlocks, trailingClientText, unsourcedAmounts, type ModelRoute } from "./routing";
 import { getOrderingRules } from "@/lib/orders";
 import { buildHistory, type HistoryRow } from "./history";
 import { withClientLock } from "./lock";
@@ -594,7 +594,7 @@ async function runAgent(
     },
     orderState,
   });
-  return runAgentLoop(system, messages, ctx);
+  return runAgentLoop(system, messages, ctx, stateReasons(state));
 }
 
 // The tool-use loop, shared by real conversations and the dashboard's practice
@@ -607,9 +607,11 @@ async function runAgent(
 export async function runAgentLoop(
   system: string,
   messages: Anthropic.MessageParam[],
-  ctx: ToolContext
+  ctx: ToolContext,
+  // Order-flow moments that always need the strong model (routing.ts: stateReasons).
+  forceStrong: string[] = []
 ): Promise<string | null> {
-  const hard = modelRoutingOn() ? hardReasons(trailingClientText(messages)) : [];
+  const hard = modelRoutingOn() ? [...forceStrong, ...hardReasons(trailingClientText(messages))] : [];
   const route = newRoute(!modelRoutingOn() || hard.length > 0 ? "strong" : "fast", hard);
   ctx.flags.route = route;
   try {

@@ -20,7 +20,7 @@ const FAST = "claude-haiku-5-5";
 const STRONG = "claude-sonnet-5-5";
 
 // ---- pure routing helpers
-const { hardReasons, trailingClientText, unsourcedAmounts, systemBlocks } = await import("../lib/agent/routing.ts");
+const { hardReasons, stateReasons, trailingClientText, unsourcedAmounts, systemBlocks } = await import("../lib/agent/routing.ts");
 check("an ordinary order message is not hard", hardReasons("Добрий день! Хочу замовити 20 круасанів на завтра").length === 0);
 check("«є безглютенові?» is hard (allergens)", hardReasons("Є безглютенові еклери?").length > 0);
 check("a complaint is hard", hardReasons("У мене скарга: торт був черствий").length > 0);
@@ -33,6 +33,9 @@ check("a burst is read as a whole (the hard word is in the first text)", hardRea
 check("only what came after the agent's last reply counts", hardReasons(trailingClientText([
   { role: "user", content: "є скарга" }, { role: "assistant", content: "Розкажіть" }, { role: "user", content: "ок, дякую" },
 ])).length === 0);
+check("changing a summary is hard, whatever the words", stateReasons({ changing: true }).length === 1);
+check("approving and adding something else is hard", stateReasons({ justPlaced: { mode: "more" } }).length === 1);
+check("a plain approval or a normal turn is not", stateReasons({ justPlaced: { mode: "ack" } }).length === 0 && stateReasons({}).length === 0);
 check("an amount nobody gave is caught", unsourcedAmounts("Наполеон — 999 грн", "ціна 120 грн").join() === "999");
 check("amounts from the sources pass (also with thousands spaces)", unsourcedAmounts("Разом 1 250 ₴ і 250 грн", "всього 1250, доставка 250").length === 0);
 const longSystem = "а".repeat(5000) + "\nПОТОЧНА СИТУАЦІЯ\nСьогодні: вівторок";
@@ -108,6 +111,15 @@ r = await run("Привіт", [
   say("Вітаємо!"),
 ]);
 check("five tool rounds on the cheap model → the sixth call is the strong one", r.models.join() === [FAST, FAST, FAST, FAST, FAST, STRONG].join(), r.models.join());
+
+// order-flow moments force the strong model even when the words look harmless
+{
+  script = [say("Звісно, змінили.")];
+  asked.length = 0;
+  const flags = { humanReviewReasons: [], massOrderFlagged: false, confirmationProposed: false, menuLinkSent: false };
+  await runAgentLoop("system", [{ role: "user", content: "ні, давайте 10 а не 20" }], { supabase: db, client: { id: CL, business_name: "К", pipeline_stage: "in_conversation" }, conversationId: "c", flags, inboundCount: 2, dryRun: true }, stateReasons({ changing: true }));
+  check("client changing a summary → strong model from the first call", asked[0]?.model === STRONG && flags.route.hard.length === 1, String(asked[0]?.model));
+}
 
 // the switch can be turned off
 process.env.AGENT_MODEL_ROUTING = "off";

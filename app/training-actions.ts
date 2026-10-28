@@ -7,7 +7,7 @@ import { getExamples, recordExample } from "@/lib/agent/memory";
 import { buildSystemPrompt } from "@/lib/agent/prompt";
 import { reviseDraft } from "@/lib/agent/revise";
 import { runAgentLoop } from "@/lib/agent/run";
-import type { ModelRoute } from "@/lib/agent/routing";
+import { stateReasons, type ModelRoute } from "@/lib/agent/routing";
 import { orderStateBlock, type LastOrderInfo, type OrderStateInput } from "@/lib/agent/orderState";
 import { isSummarized, missingFields, type OrderDraft } from "@/lib/chatOrders";
 import { classifySummaryReply, draftText } from "@/lib/orderApproval";
@@ -104,7 +104,7 @@ export async function practiceReply(
       dryRun: true,
       inboundCount: history.filter((t) => t.role === "client").length,
       practiceState,
-    });
+    }, stateReasons({ changing, justPlaced }));
     if (!text) return { ok: false, error: flags.humanReviewReasons.join("; ") || "Агент не дав відповіді." };
     // Same safety net as in real chats: a summary written without review_order still counts as shown.
     const shownDraft = practiceState.draft_order as OrderDraft | undefined;
