@@ -11,6 +11,8 @@ import { formatDateTime } from "@/lib/utils";
 import Sidebar from "./Sidebar";
 import LangToggle from "./LangToggle";
 import NewClientForm from "./NewClientForm";
+import BoardColumn from "./BoardColumn";
+import { dt } from "@/lib/dashText";
 
 function ClientCard({
   client,
@@ -109,6 +111,7 @@ export default function ClientsList({
 }) {
   const [lang, setLang] = useState<Lang>("uk");
   const [showForm, setShowForm] = useState(false);
+  const [query, setQuery] = useState("");
   const [items, setItems] = useState(clients);
   const [, startTransition] = useTransition();
   const t = STR[lang];
@@ -135,6 +138,11 @@ export default function ClientsList({
       await deleteClient(id, false);
     });
   };
+
+  const q = query.trim().toLowerCase();
+  const visible = q ? items.filter((c) => [c.business_name, c.contact_name, c.phone].some((v) => (v ?? "").toLowerCase().includes(q))) : items;
+  // The people who wrote most recently first — in a long column those are the ones that matter.
+  const byRecentContact = (list: Client[]) => [...list].sort((a, b) => Date.parse(b.last_contact_at ?? "1970-01-01") - Date.parse(a.last_contact_at ?? "1970-01-01"));
 
   return (
     <div className="min-h-screen bg-[#FAF6EF] flex text-stone-900">
@@ -170,27 +178,35 @@ export default function ClientsList({
           </div>
         </div>
 
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={dt(lang).searchClients}
+            className="w-full sm:w-72 border border-stone-200 bg-white rounded px-3 py-1.5 text-sm"
+          />
+          {q && (
+            <>
+              <span className="text-[12px] text-stone-500">{dt(lang).found(visible.length)}</span>
+              <button onClick={() => setQuery("")} className="text-[12px] text-stone-400 hover:text-stone-700 underline">
+                {dt(lang).clear}
+              </button>
+            </>
+          )}
+        </div>
+
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-          {PIPELINE_STAGES.map((stage) => {
-            const stageClients = items.filter((c) => c.pipeline_stage === stage);
-            return (
-              <div key={stage} className="min-w-0">
-                <div className="flex items-center justify-between mb-2 px-1">
-                  <p className="text-[12px] font-medium text-stone-500">{t[PIPELINE_STAGE_KEY[stage]]}</p>
-                  <span className="text-[11px] text-stone-400">{stageClients.length}</span>
-                </div>
-                <div className="bg-stone-100/60 rounded-lg p-2 min-h-[120px]">
-                  {stageClients.length === 0 ? (
-                    <p className="text-[12px] text-stone-400 text-center py-6">{t.empty}</p>
-                  ) : (
-                    stageClients.map((c) => (
-                      <ClientCard key={c.id} client={c} lang={lang} onMove={(d) => move(c.id, d)} onDelete={() => remove(c.id)} />
-                    ))
-                  )}
-                </div>
-              </div>
-            );
-          })}
+          {PIPELINE_STAGES.map((stage) => (
+            <BoardColumn
+              key={stage}
+              label={t[PIPELINE_STAGE_KEY[stage]]}
+              items={byRecentContact(visible.filter((c) => c.pipeline_stage === stage))}
+              empty={t.empty}
+              lang={lang}
+              limit={8}
+              render={(c) => <ClientCard client={c} lang={lang} onMove={(dir) => move(c.id, dir)} onDelete={() => remove(c.id)} />}
+            />
+          ))}
         </div>
       </main>
 
