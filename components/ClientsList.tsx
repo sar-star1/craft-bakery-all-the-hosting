@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
+import { CopyButton } from "./ClientLinks";
 import { deleteClient, updateClientPipelineStage } from "@/app/actions";
 import Link from "next/link";
 import type { Lang } from "@/lib/i18n";
@@ -98,9 +99,12 @@ function ClientCard({
 
 export default function ClientsList({
   clients,
+  invites = [],
   sampleMode = false,
 }: {
   clients: Client[];
+  // Clients not in the bot yet, with the links to send them (see ClientLinks).
+  invites?: { name: string; order: string | null; bot: string | null }[];
   sampleMode?: boolean;
 }) {
   const [lang, setLang] = useState<Lang>("uk");
@@ -150,12 +154,20 @@ export default function ClientsList({
             <h1 className="font-serif text-2xl">{t.navClientsTitle}</h1>
             <p className="text-stone-500 text-sm mt-0.5">{t.clientPipelineSubtitle}</p>
           </div>
+          <div className="flex items-center gap-2">
+            {invites.length > 0 && (
+              <CopyButton
+                label={`Скопіювати посилання (${invites.length})`}
+                text={["Клієнт\tЗамовлення на сайті\tTelegram-бот", ...invites.map((i) => `${i.name}\t${i.order ?? ""}\t${i.bot ?? ""}`)].join("\n")}
+              />
+            )}
           <button
             onClick={() => setShowForm(true)}
             className="text-sm bg-stone-900 text-white px-4 py-2 rounded hover:bg-stone-800"
           >
             {t.newClient}
           </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">

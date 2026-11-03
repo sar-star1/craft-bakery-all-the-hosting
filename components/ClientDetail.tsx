@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import ClientLinks from "./ClientLinks";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { deleteClient, updateClientBlockerNote, updateClientPipelineStage } from "@/app/actions";
@@ -27,6 +28,7 @@ export default function ClientDetail({
   messages,
   events = [],
   orderLink,
+  botLink = null,
   sampleMode = false,
 }: {
   client: Client;
@@ -36,6 +38,7 @@ export default function ClientDetail({
   messages: Message[];
   events?: AgentEvent[];
   orderLink: string | null;
+  botLink?: string | null;
   sampleMode?: boolean;
 }) {
   const [lang, setLang] = useState<Lang>("uk");
@@ -166,12 +169,7 @@ export default function ClientDetail({
           </div>
         )}
 
-        {orderLink && (
-          <div className="bg-white rounded-md border border-stone-200 p-4 mb-6">
-            <p className="text-stone-400 text-[11px] uppercase tracking-wide mb-1">{t.clientOrderLink}</p>
-            <code className="text-[12px] text-stone-700 break-all">{orderLink}</code>
-          </div>
-        )}
+        {(orderLink || botLink) && <ClientLinks orderLink={orderLink} botLink={botLink} inBot={Boolean(client.telegram_chat_id)} />}
 
         <section className="mb-8">
           <h2 className="font-serif text-lg mb-3">{t.clientMessages}</h2>

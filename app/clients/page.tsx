@@ -2,6 +2,8 @@ import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase
 import type { Client } from "@/lib/types";
 import { mockClients } from "@/lib/mockClients";
 import ClientsList from "@/components/ClientsList";
+import { getStorefrontLink } from "@/lib/clientToken";
+import { getBotLink } from "@/lib/telegram";
 
 export const dynamic = "force-dynamic";
 
@@ -27,5 +29,10 @@ export default async function ClientsPage() {
     );
   }
 
-  return <ClientsList clients={(data ?? []) as Client[]} />;
+  const clients = (data ?? []) as Client[];
+  // For the "copy the links" button: everyone who is not in the bot yet, with the links to send them.
+  const invites = clients
+    .filter((c) => !c.telegram_chat_id)
+    .map((c) => ({ name: c.business_name, order: getStorefrontLink(c.id), bot: getBotLink(c.id, false) }));
+  return <ClientsList clients={clients} invites={invites} />;
 }

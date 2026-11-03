@@ -241,3 +241,15 @@ export function getBotDeepLink(clientId: string): string | null {
   if (!username) return null;
   return `https://t.me/${username}?start=${clientIdToStartPayload(clientId)}`;
 }
+
+const botUsername = () => process.env.TELEGRAM_BOT_USERNAME?.replace(/^@/, "").trim() || null;
+
+// The link a client taps to reach the bot from the website or a message from the team.
+// A known client who is not on Telegram yet gets their personal link (the first Start ties the
+// chat to their record); one who already is just opens the chat; an unknown visitor starts a new lead.
+export function getBotLink(clientId?: string | null, linked = false): string | null {
+  const username = botUsername();
+  if (!username) return null;
+  if (clientId && !linked) return `https://t.me/${username}?start=${clientIdToStartPayload(clientId)}`;
+  return linked ? `https://t.me/${username}` : `https://t.me/${username}?start=web`;
+}

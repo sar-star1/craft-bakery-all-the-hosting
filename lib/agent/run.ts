@@ -18,6 +18,7 @@ import {
 } from "@/lib/chatOrders";
 import { relayToTeam } from "@/lib/takeover";
 import { approveSummaryByMessage } from "@/lib/orderApproval";
+import { confirmSiteOrderInTelegram } from "@/lib/siteOrderNotice";
 import { buildOrderState, lastChatOrderAt, type OrderStateInput } from "./orderState";
 import { notifyAdmin, sendTelegramMessage, sendTypingAction, setMessageReaction, startPayloadToClientId } from "@/lib/telegram";
 import type { ClientSource, PipelineStage } from "@/lib/types";
@@ -230,6 +231,8 @@ async function handleStart(msg: TelegramMessage, payload: string) {
     : `Вітаю${who}! Це асистент Peremoga Bakery, раді вас бачити. Пишіть сюди щодо замовлень — допоможемо з меню, цінами та доставкою.`;
   const sent = await sendTelegramMessage(chatId, greeting);
   if (sent.ok) await logOutgoing(db, client.id, null, greeting, sent.messageId);
+  // Came from the site after ordering: the order they just placed is confirmed here, once.
+  if (migrationId && client.id === migrationId) await confirmSiteOrderInTelegram(db, client.id).catch((err) => console.error("site order confirmation failed", err));
 }
 
 async function getOrCreateConversation(db: Db, clientId: string): Promise<{ id: string; captured_fields: Record<string, unknown> }> {

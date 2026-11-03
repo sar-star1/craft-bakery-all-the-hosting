@@ -204,6 +204,15 @@ link stays available for photos and browsing.
 The seasonal-offer form accepts up to 5 files (images, PDF, Word/Excel/
 PowerPoint, 4 MB each). They are sent after the text of each approved message.
 
+## Bringing existing clients in: the website first, the personal bot link second
+
+A bot can't message anyone first, so every client taps Start once. Two ways to get them there:
+
+1. **Website as the front door.** The team sends each client their personal order link (`/order?ref=…`) from the chat they already have. The site shows a **Telegram button** in the header, and after an order a **thank-you screen** offering "Отримати підтвердження в Telegram". One tap opens the bot with the client's personal start link, which ties the chat to their record; the bot then greets them and **confirms the order they just placed** (fixed text, sent once, only for a website order from the last 3 days). A client who is already in the bot gets that confirmation straight after ordering. Anything they write after that — "add one more cake" — is handled by the agent, which can amend the website order while it is still new.
+2. **Personal bot link from the team.** Each client's page shows their bot link and a ready-to-paste invitation message (site link + bot link) with a copy button; **Клієнти → "Скопіювати посилання"** copies a name / site link / bot link table for everyone not in the bot yet.
+
+Needs `TELEGRAM_BOT_USERNAME` in Vercel (the bot's username without @) — without it the buttons are hidden and the pages say so.
+
 ## Cost: a cheap model first, the strong one only when needed
 
 Every message is answered by a **cheap model** (`claude-haiku-5-5`, `ANTHROPIC_MODEL_FAST`); the **strong model** (`claude-sonnet-5-5`, `ANTHROPIC_MODEL`) takes over in two ways (`lib/agent/routing.ts`, `runAgentLoop` in `lib/agent/run.ts`):
