@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import type { AgentEvent, Client, Conversation, Message, Order, PendingReply } from "@/lib/types";
 import { getStorefrontLink } from "@/lib/clientToken";
+import { getBotLink } from "@/lib/telegram";
 import { mockClients, mockConversations, mockMessages, mockPendingReplies } from "@/lib/mockClients";
 import { mockOrders } from "@/lib/mockOrders";
 import ClientDetail from "@/components/ClientDetail";
@@ -85,6 +86,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       messages={(messages ?? []) as Message[]}
       events={(events ?? []) as AgentEvent[]}
       orderLink={getStorefrontLink(id)}
+      botLink={getBotLink(id, Boolean((client as { telegram_chat_id?: string | null }).telegram_chat_id))}
     />
   );
 }

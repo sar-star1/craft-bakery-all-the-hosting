@@ -1,5 +1,5 @@
 import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase/server";
-import { AGENT_MODEL } from "@/lib/agent/anthropic";
+import { AGENT_MODEL, FAST_MODEL, modelRoutingOn } from "@/lib/agent/anthropic";
 import { getRouting, telegramApi, type Routing } from "@/lib/telegram";
 import { getOrderingRules } from "@/lib/orders";
 import { DEFAULT_ORDERING_RULES } from "@/lib/orderRules";
@@ -16,6 +16,7 @@ const ENV_VARS: { name: string; secret: boolean; needed: string }[] = [
   { name: "TELEGRAM_WEBHOOK_SECRET", secret: true, needed: "вебхук" },
   { name: "ANTHROPIC_API_KEY", secret: true, needed: "AI-агент" },
   { name: "SITE_URL", secret: false, needed: "посилання та вебхук" },
+  { name: "STORE_URL", secret: false, needed: "коротка адреса замовлень для клієнтів (необов'язково)" },
   { name: "CRON_SECRET", secret: true, needed: "щоденні/щотижневі завдання" },
   { name: "DASHBOARD_PASSWORD", secret: true, needed: "вхід у дашборд" },
   { name: "WEBSITE_URL", secret: false, needed: "редактор публічного сайту" },
@@ -26,6 +27,8 @@ export default async function SetupPage() {
   const status: SetupStatus = {
     env: ENV_VARS.map((v) => ({ ...v, set: Boolean(process.env[v.name]) })),
     model: AGENT_MODEL,
+    fastModel: modelRoutingOn() ? FAST_MODEL : null,
+    modelUse: null,
     siteUrl: process.env.SITE_URL?.replace(/\/$/, "") ?? null,
     supabase: null,
     telegram: null,
@@ -71,6 +74,22 @@ export default async function SetupPage() {
       status.ordering = await getOrderingRules(db);
       status.routing = await getRouting();
       status.examples = (examples ?? []) as SetupStatus["examples"];
+      // How the last 7 days of agent turns split between the cheap and the strong model.
+      const { data: routes } = await db
+        .from("agent_events")
+        .select("detail")
+        .eq("kind", "model_route")
+        .gte("created_at", new Date(Date.now() - 7 * 86_400_000).toISOString())
+        .limit(5000);
+      if (routes?.length) {
+        const use = { turns: routes.length, cheapOnly: 0, startedStrong: 0, escalated: 0 };
+        for (const r of routes as { detail: { start?: string; escalated_because?: string | null } }[]) {
+          if (r.detail?.start === "strong") use.startedStrong++;
+          else if (r.detail?.escalated_because) use.escalated++;
+          else use.cheapOnly++;
+        }
+        status.modelUse = use;
+      }
     } catch (err) {
       status.supabase = { ok: false, error: err instanceof Error ? err.message : String(err) };
     }

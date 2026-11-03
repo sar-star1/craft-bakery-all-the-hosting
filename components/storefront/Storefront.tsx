@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { z } from "zod";
-import { Info, Minus, Plus, ShoppingCart, Snowflake, Tag, X } from "lucide-react";
+import { Info, Minus, Plus, Send, ShoppingCart, Snowflake, Tag, X } from "lucide-react";
 import { submitWebsiteOrder } from "@/app/order-actions";
 import { deliveryFor, type OrderingRules } from "@/lib/orderRules";
 import { formatUAH, type StoreData, type StoreItem } from "@/lib/storefront";
@@ -54,6 +54,7 @@ export default function Storefront({
   data,
   refToken,
   prefillName,
+  telegram,
   rules,
   profile,
   sampleMode = false,
@@ -61,6 +62,8 @@ export default function Storefront({
   data: StoreData;
   refToken?: string;
   prefillName?: string;
+  // The way into the Telegram bot; `linked` = this client is already chatting with it.
+  telegram?: { link: string; linked: boolean };
   rules: OrderingRules;
   // What we remember about this client (from earlier orders).
   profile?: { fop?: string; address?: string; payment_method?: "cash" | "cashless"; phone?: string };
@@ -69,6 +72,7 @@ export default function Storefront({
   const { categories, promo, terms } = data;
   const [cart, setCart] = useState<CartMap>({});
   const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [placedOpen, setPlacedOpen] = useState(false);
   const [termsOpen, setTermsOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -238,6 +242,7 @@ export default function Storefront({
     setCart({});
     setForm((f) => ({ ...f, notes: "" }));
     setCheckoutOpen(false);
+    if (telegram) setPlacedOpen(true);
   };
 
   const renderItem = (item: StoreItem, keyPrefix = "") => {
@@ -405,6 +410,14 @@ export default function Storefront({
                 <span className="font-body uppercase tracking-[0.2em] text-[11px]">{promo.title}</span>
               </button>
             )}
+            {telegram && (
+              <Button asChild variant="outline" className="gap-2">
+                <a href={telegram.link} target="_blank" rel="noopener noreferrer" aria-label="Написати нам у Telegram">
+                  <Send className="h-4 w-4" />
+                  <span className="hidden sm:inline font-body uppercase tracking-[0.2em] text-[11px]">Написати в Telegram</span>
+                </a>
+              </Button>
+            )}
             {terms && (
               <Button type="button" variant="outline" onClick={() => setTermsOpen(true)} className="gap-2">
                 <Info className="h-4 w-4" />
@@ -531,6 +544,32 @@ export default function Storefront({
                   </ul>
                 </div>
               ))}
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {telegram && (
+        <Dialog open={placedOpen} onOpenChange={setPlacedOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="font-display-black uppercase text-lg">Дякуємо, замовлення прийнято</DialogTitle>
+              <DialogDescription className="font-body text-sm text-muted-foreground">
+                {telegram.linked
+                  ? "Підтвердження замовлення вже надіслали вам у Telegram. Якщо треба щось змінити чи додати — просто напишіть нам там."
+                  : "Хочете отримати підтвердження в Telegram і мати швидкий зв'язок із нами? Натисніть кнопку нижче — бот одразу надішле деталі замовлення, а будь-які питання чи зміни можна написати там же."}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex flex-col gap-2 pt-2">
+              <Button asChild className="gap-2">
+                <a href={telegram.link} target="_blank" rel="noopener noreferrer">
+                  <Send className="h-4 w-4" />
+                  {telegram.linked ? "Відкрити чат у Telegram" : "Отримати підтвердження в Telegram"}
+                </a>
+              </Button>
+              <Button type="button" variant="ghost" onClick={() => setPlacedOpen(false)}>
+                Закрити
+              </Button>
             </div>
           </DialogContent>
         </Dialog>

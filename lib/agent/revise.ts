@@ -1,5 +1,5 @@
 import "server-only";
-import { AGENT_MODEL, getAnthropic } from "./anthropic";
+import { FAST_MODEL, getAnthropic } from "./anthropic";
 import { guidelinesBlock } from "./guidelines";
 
 export interface Revision {
@@ -22,7 +22,7 @@ export async function reviseDraft(input: {
   question?: string | null;
 }): Promise<Revision> {
   const response = await getAnthropic().messages.create({
-    model: AGENT_MODEL,
+    model: FAST_MODEL,
     max_tokens: 1200,
     system: `Ти редактор відповідей AI-асистента пекарні Peremoga Bakery. Адміністратор залишив зауваження до чернетки відповіді клієнту.
 ${guidelinesBlock(input.guidelines)}

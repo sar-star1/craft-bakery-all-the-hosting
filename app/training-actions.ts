@@ -7,6 +7,7 @@ import { getExamples, recordExample } from "@/lib/agent/memory";
 import { buildSystemPrompt } from "@/lib/agent/prompt";
 import { reviseDraft } from "@/lib/agent/revise";
 import { runAgentLoop } from "@/lib/agent/run";
+import { stateReasons, type ModelRoute } from "@/lib/agent/routing";
 import { orderStateBlock, type LastOrderInfo, type OrderStateInput } from "@/lib/agent/orderState";
 import { isSummarized, missingFields, type OrderDraft } from "@/lib/chatOrders";
 import { classifySummaryReply, draftText } from "@/lib/orderApproval";
@@ -103,7 +104,7 @@ export async function practiceReply(
       dryRun: true,
       inboundCount: history.filter((t) => t.role === "client").length,
       practiceState,
-    });
+    }, stateReasons({ changing, justPlaced }));
     if (!text) return { ok: false, error: flags.humanReviewReasons.join("; ") || "Агент не дав відповіді." };
     // Same safety net as in real chats: a summary written without review_order still counts as shown.
     const shownDraft = practiceState.draft_order as OrderDraft | undefined;
@@ -112,6 +113,7 @@ export async function practiceReply(
       if (priced.ok && replyShowsTotal(text, priced.grand_total)) shownDraft.summary_at_inbound = clientTurns;
     }
     const notes = [
+      ...(flags.route ? [modelNote(flags.route)] : []),
       ...flags.humanReviewReasons.map((r) => `Передав би людині: ${r}`),
       ...(justPlaced ? [`Оформив би замовлення: клієнт підтвердив ${justPlaced.mode === "ack" ? "підсумок" : "підсумок і написав ще щось"} — без жодного перепитування`] : []),
       ...(flags.reaction ? [`Поставив би реакцію ${flags.reaction} на повідомлення клієнта`] : []),
@@ -164,4 +166,11 @@ export async function practiceSaveExample(clientMessage: string, reply: string):
   } catch (err) {
     return { ok: false, message: err instanceof Error ? err.message : String(err) };
   }
+}
+
+// One line for the practice chat: which model answered, and why it was the strong one if so.
+function modelNote(r: ModelRoute): string {
+  if (r.start === "strong") return `Відповідала сильна модель — складне повідомлення (${r.hard.join(", ")})`;
+  if (r.escalatedBecause) return `Почала дешева модель, закінчила сильна — причина: ${r.escalatedBecause}`;
+  return "Відповідала дешева модель";
 }

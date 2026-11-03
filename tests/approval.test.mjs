@@ -13,6 +13,7 @@ const tg = stubTelegram();
 const srv = await start(54795);
 setTimeout(() => { console.log("TIMEOUT — test hung"); process.exit(2); }, 90000).unref();
 const { check, done } = makeChecker();
+const sysText = (sys) => (Array.isArray(sys) ? sys.map((b) => b.text).join("") : String(sys));
 
 // ---- a scripted model: tells the approval classifier apart from the agent by its system prompt
 const modelCalls = [];
@@ -23,7 +24,7 @@ const priorFetch = globalThis.fetch;
 globalThis.fetch = async (url, init) => {
   if (String(url).includes("api.anthropic.com")) {
     const body = JSON.parse(init.body);
-    const isClassifier = String(body.system).startsWith("Клієнт пекарні отримав підсумок");
+    const isClassifier = sysText(body.system).startsWith("Клієнт пекарні отримав підсумок");
     modelCalls.push({ kind: isClassifier ? "classifier" : "agent", body });
     if (isClassifier && classifierDown) return new Response(JSON.stringify({ type: "error", error: { type: "api_error", message: "down" } }), { status: 400, headers: { "Content-Type": "application/json" } });
     const text = isClassifier ? classifierAnswer : agentReply;
@@ -79,7 +80,7 @@ for (const word of ["Ок , дякую", "Так супер 👍 \nДякую", 
 reset("11111111-1111-4111-8111-111111111111", { draft_order: draft() });
 await say("Ок , дякую");
 const agentCall = modelCalls.find((c) => c.kind === "agent");
-const sys = String(agentCall.body.system);
+const sys = sysText(agentCall.body.system);
 check("the agent is told the order was JUST placed and not to ask again", sys.includes("ЩОЙНО ОФОРМЛЕНО СИСТЕМОЮ") && sys.includes("НІЧОГО не перепитуй"), sys.slice(-900));
 check("the closed order's history is cut: the agent sees only the message it must answer", agentCall.body.messages.length === 1 && agentCall.body.messages[0].content === "Ок , дякую", JSON.stringify(agentCall.body.messages));
 check("the confirmation reaches the client straight away (not held for approval)", sentToClient().some((t) => /Замовлення прийнято/.test(t)) && tables.pending_replies.length === 0, JSON.stringify({ sent: sentToClient(), held: tables.pending_replies.length }));
@@ -91,7 +92,7 @@ modelCalls.length = 0;
 tg.length = 0;
 await say("А що порадите до кави?", 301);
 const next = modelCalls.find((c) => c.kind === "agent");
-const sys2 = String(next.body.system);
+const sys2 = sysText(next.body.system);
 check("no summary is waiting, so nothing is classified or placed", !modelCalls.some((c) => c.kind === "classifier") && tables.orders.length === 1);
 check("state: last order is CLOSED, can still be amended, next message starts a new order", sys2.includes("ЗАКРИТЕ") && sys2.includes("amend_last_order") && sys2.includes("початок НОВОГО замовлення"), sys2.slice(-1200));
 check("the old summary and confirmation are not in the history any more", next.body.messages.every((m) => !String(m.content).includes("Усе вірно?")) && next.body.messages.at(-1).content === "А що порадите до кави?", JSON.stringify(next.body.messages));
@@ -102,7 +103,7 @@ classifierAnswer = "CHANGE";
 agentReply = "Звісно, додамо еклери. Скільки?";
 await say("А можна ще 5 еклерів?", 80);
 check("a change request is classified by the model and nothing is placed", modelCalls.some((c) => c.kind === "classifier") && tables.orders.length === 0 && Boolean(tables.conversations[0].captured_fields.draft_order));
-check("the agent is told the client is CHANGING the summary (not approving)", String(modelCalls.find((c) => c.kind === "agent").body.system).includes("ЗМІНЮЄ"));
+check("the agent is told the client is CHANGING the summary (not approving)", sysText(modelCalls.find((c) => c.kind === "agent").body.system).includes("ЗМІНЮЄ"));
 
 // ---- 5. approval + something new in one message
 reset("11111111-1111-4111-8111-111111111111", { draft_order: draft() });
@@ -110,7 +111,7 @@ classifierAnswer = "MORE";
 agentReply = "Замовлення прийнято. На п'ятницю підкажемо!";
 await say("Дякую! А що в вас є на пʼятницю?", 90);
 check("approval + new question: the pending order is placed ('continued')", tables.orders[0]?.item_details_uk?.approval === "continued");
-check("the agent is told to confirm in one sentence, then deal with the rest", String(modelCalls.find((c) => c.kind === "agent").body.system).includes("Спершу одним теплим реченням"));
+check("the agent is told to confirm in one sentence, then deal with the rest", sysText(modelCalls.find((c) => c.kind === "agent").body.system).includes("Спершу одним теплим реченням"));
 
 // ---- 6. a summary the client never saw (held for approval) can't be approved by their message
 reset("11111111-1111-4111-8111-111111111111", { draft_order: draft({ summary_sent_at: undefined, summary_message_id: undefined }) });
@@ -176,7 +177,7 @@ check("ordinary text isn't flagged", !claimsOrderChanged("Яка адреса д
   modelCalls.length = 0;
   await say("ок", 141);
   check("«ок» after it approves: the order is placed, no panic, no second summary", tables.orders.length === 1 && tables.orders[0].item_details_uk.approval === "text", JSON.stringify(tables.orders.map((o) => o.item_details_uk?.approval)));
-  check("   …and the agent was told it is placed (so it cannot apologise)", String(modelCalls.find((c) => c.kind === "agent")?.body.system).includes("ЩОЙНО ОФОРМЛЕНО СИСТЕМОЮ"));
+  check("   …and the agent was told it is placed (so it cannot apologise)", sysText(modelCalls.find((c) => c.kind === "agent")?.body.system).includes("ЩОЙНО ОФОРМЛЕНО СИСТЕМОЮ"));
 }
 
 // ---- strict mode (the default): even a routine reply to an established client waits for the team

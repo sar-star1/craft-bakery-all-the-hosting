@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Storefront from "@/components/storefront/Storefront";
 import { refTokenToClientId } from "@/lib/clientToken";
+import { getBotLink } from "@/lib/telegram";
 import { mockMenuCategories, mockMenuItems, mockStorefrontContent } from "@/lib/mockMenu";
 import { getOrderingRules } from "@/lib/orders";
 import { DEFAULT_ORDERING_RULES } from "@/lib/orderRules";
@@ -40,10 +41,13 @@ export default async function OrderPage({
     supabase.from("menu_items").select("*"),
     supabase.from("site_content").select("*"),
     clientId
-      ? supabase.from("clients").select("business_name, fop, delivery_address, payment_method, phone").eq("id", clientId).maybeSingle()
+      ? supabase.from("clients").select("business_name, fop, delivery_address, payment_method, phone, telegram_chat_id").eq("id", clientId).maybeSingle()
       : Promise.resolve({ data: null }),
     getOrderingRules(supabase),
   ]);
+
+  const linked = Boolean(clientRow.data?.telegram_chat_id);
+  const botLink = getBotLink(clientRow.data ? clientId : null, linked);
 
   return (
     <Storefront
@@ -54,6 +58,7 @@ export default async function OrderPage({
       )}
       refToken={clientRow.data ? ref : undefined}
       prefillName={clientRow.data?.business_name as string | undefined}
+      telegram={botLink ? { link: botLink, linked } : undefined}
       rules={rules}
       profile={
         clientRow.data

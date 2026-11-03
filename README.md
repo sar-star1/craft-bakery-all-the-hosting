@@ -204,6 +204,29 @@ link stays available for photos and browsing.
 The seasonal-offer form accepts up to 5 files (images, PDF, Word/Excel/
 PowerPoint, 4 MB each). They are sent after the text of each approved message.
 
+## Bringing existing clients in: the website first, the personal bot link second
+
+A bot can't message anyone first, so every client taps Start once. Two ways to get them there:
+
+1. **Website as the front door.** The team sends each client their personal order link (`/order?ref=…`) from the chat they already have. The site shows a **Telegram button** in the header, and after an order a **thank-you screen** offering "Отримати підтвердження в Telegram". One tap opens the bot with the client's personal start link, which ties the chat to their record; the bot then greets them and **confirms the order they just placed** (fixed text, sent once, only for a website order from the last 3 days). A client who is already in the bot gets that confirmation straight after ordering. Anything they write after that — "add one more cake" — is handled by the agent, which can amend the website order while it is still new.
+2. **Personal bot link from the team.** Each client's page shows their bot link and a ready-to-paste invitation message (site link + bot link) with a copy button; **Клієнти → "Скопіювати посилання"** copies a name / site link / bot link table for everyone not in the bot yet.
+
+**Short ordering domain.** Set `STORE_URL` (e.g. `https://order.peremogabakery.com`, a CNAME in Cloudflare to the Vercel project, DNS only) and clients' links become `https://order.peremogabakery.com/?ref=…`. That host shows the storefront at `/` and sends every dashboard address back to it; the dashboard, the webhook and the admin links stay on `SITE_URL` — don't change `SITE_URL` for this.
+
+Needs `TELEGRAM_BOT_USERNAME` in Vercel (the bot's username without @) — without it the buttons are hidden and the pages say so.
+
+## Cost: a cheap model first, the strong one only when needed
+
+Every message is answered by a **cheap model** (`claude-haiku-5-5`, `ANTHROPIC_MODEL_FAST`); the **strong model** (`claude-sonnet-5-5`, `ANTHROPIC_MODEL`) takes over in two ways (`lib/agent/routing.ts`, `runAgentLoop` in `lib/agent/run.ts`):
+
+- **Starts strong at fixed moments of the order flow**, whatever the words (these come from what the code knows, not a guess): the client is **changing a summary**, or **approves the order and writes something else** in the same message.
+- **Starts strong** when the client's message contains a hard signal (the word list is `HARD` in `lib/agent/routing.ts`): a complaint or problem, a discount / deferred payment / special terms, allergens or ingredients, a wedding or other big event, custom products, a request for a person, large quantities, a very long message or long item list.
+- **Moves up mid-answer** when the cheap model's work doesn't hold up: its reply broke a reply rule (promised to clarify without asking the team, missed the free-delivery shortfall, summary without `review_order`, …), it quoted an **amount that appears nowhere** in what it was given (tool results, the conversation, the rules), it came back empty or errored, or it needed more than 5 tool rounds. The strong model continues the same conversation with all tool results so far, so nothing is done twice.
+
+The small one-word / one-message jobs (is this reply an approval?, write what the team said to tell the client, redo a draft after feedback, reminders) always run on the cheap model; rare one-off jobs (teaching a rule, importing a menu) on the strong one. The long stable part of the agent's instructions (rules, examples) is sent with prompt caching, so repeat reads cost a fraction.
+
+Settings → AI shows both models and how the last 7 days of answers split (cheap only / moved up / started strong); the practice chat names the model that answered. `AGENT_MODEL_ROUTING=off` sends everything to the strong model again.
+
 ## Approval policy (`lib/agent/policy.ts`)
 
 **Strict mode (default for now):** every reply the agent writes waits in the staff group for ✅

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { refTokenToClientId } from "@/lib/clientToken";
 import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { confirmSiteOrderInTelegram } from "@/lib/siteOrderNotice";
 import { announceNewOrder, markClientOrdered, priceOrderLines, saveClientProfile } from "@/lib/orders";
 
 const orderSchema = z.object({
@@ -119,5 +120,7 @@ export async function submitWebsiteOrder(input: SubmitOrderInput): Promise<Submi
   } catch (err) {
     console.error("post-order side effects failed", err);
   }
+  // Already in the bot? Confirm there too. (Not yet? The site offers a button that does it on the first tap.)
+  if (clientId) await confirmSiteOrderInTelegram(supabase, clientId).catch((err) => console.error("telegram confirmation failed", err));
   return { ok: true };
 }

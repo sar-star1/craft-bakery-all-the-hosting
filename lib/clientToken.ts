@@ -15,9 +15,14 @@ export function refTokenToClientId(token: string | null | undefined): string | n
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-// Server-only in practice (reads SITE_URL); returns null until it's set.
+// What clients are sent. With STORE_URL set (the short ordering domain, e.g. https://order.peremogabakery.com),
+// the storefront is that domain's front page; otherwise it is <SITE_URL>/order.
+// Server-only in practice (reads env); returns null until one of them is set.
 export function getStorefrontLink(clientId: string): string | null {
+  const token = clientIdToRefToken(clientId);
+  const store = process.env.STORE_URL?.replace(/\/$/, "");
+  if (store) return `${store}/?ref=${token}`;
   const base = process.env.SITE_URL?.replace(/\/$/, "");
   if (!base) return null;
-  return `${base}/order?ref=${clientIdToRefToken(clientId)}`;
+  return `${base}/order?ref=${token}`;
 }

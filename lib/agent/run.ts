@@ -18,10 +18,12 @@ import {
 } from "@/lib/chatOrders";
 import { relayToTeam } from "@/lib/takeover";
 import { approveSummaryByMessage } from "@/lib/orderApproval";
+import { confirmSiteOrderInTelegram } from "@/lib/siteOrderNotice";
 import { buildOrderState, lastChatOrderAt, type OrderStateInput } from "./orderState";
 import { notifyAdmin, sendTelegramMessage, sendTypingAction, setMessageReaction, startPayloadToClientId } from "@/lib/telegram";
 import type { ClientSource, PipelineStage } from "@/lib/types";
-import { AGENT_MODEL, getAnthropic, isAnthropicConfigured } from "./anthropic";
+import { AGENT_MODEL, FAST_MODEL, getAnthropic, isAnthropicConfigured, modelRoutingOn } from "./anthropic";
+import { hardReasons, newRoute, stateReasons, sourceText, systemBlocks, trailingClientText, unsourcedAmounts, type ModelRoute } from "./routing";
 import { getOrderingRules } from "@/lib/orders";
 import { buildHistory, type HistoryRow } from "./history";
 import { withClientLock } from "./lock";
@@ -229,6 +231,8 @@ async function handleStart(msg: TelegramMessage, payload: string) {
     : `Вітаю${who}! Це асистент Peremoga Bakery, раді вас бачити. Пишіть сюди щодо замовлень — допоможемо з меню, цінами та доставкою.`;
   const sent = await sendTelegramMessage(chatId, greeting);
   if (sent.ok) await logOutgoing(db, client.id, null, greeting, sent.messageId);
+  // Came from the site after ordering: the order they just placed is confirmed here, once.
+  if (migrationId && client.id === migrationId) await confirmSiteOrderInTelegram(db, client.id).catch((err) => console.error("site order confirmation failed", err));
 }
 
 async function getOrCreateConversation(db: Db, clientId: string): Promise<{ id: string; captured_fields: Record<string, unknown> }> {
@@ -593,33 +597,95 @@ async function runAgent(
     },
     orderState,
   });
-  return runAgentLoop(system, messages, ctx);
+  return runAgentLoop(system, messages, ctx, stateReasons(state));
 }
 
 // The tool-use loop, shared by real conversations and the dashboard's practice
 // chat (which passes a dry-run ToolContext).
+//
+// Model tiers: a turn starts on the cheap model unless the client's message looks hard, and moves
+// to the strong one — keeping the conversation and every tool result so far, so nothing is done
+// twice — when the cheap model's work doesn't hold up: it broke a reply rule, quoted an amount
+// nobody gave it, came back empty, errored, or kept needing more tool rounds than a normal turn.
 export async function runAgentLoop(
   system: string,
   messages: Anthropic.MessageParam[],
-  ctx: ToolContext
+  ctx: ToolContext,
+  // Order-flow moments that always need the strong model (routing.ts: stateReasons).
+  forceStrong: string[] = []
+): Promise<string | null> {
+  const hard = modelRoutingOn() ? [...forceStrong, ...hardReasons(trailingClientText(messages))] : [];
+  const route = newRoute(!modelRoutingOn() || hard.length > 0 ? "strong" : "fast", hard);
+  ctx.flags.route = route;
+  try {
+    return await runLoop(system, messages, ctx, route);
+  } finally {
+    if (!ctx.dryRun) {
+      await logAgentEvent(ctx.supabase, ctx.client.id, "model_route", {
+        start: route.start,
+        hard: route.hard,
+        escalated_because: route.escalatedBecause ?? null,
+        calls: route.calls,
+        tokens: route.tokens,
+      });
+    }
+  }
+}
+
+// Tool rounds a normal order turn can take (menu, draft, terms, review…) before the cheap model
+// is judged to be struggling.
+const FAST_TOOL_ROUNDS = 5;
+
+async function runLoop(
+  system: string,
+  messages: Anthropic.MessageParam[],
+  ctx: ToolContext,
+  route: ModelRoute
 ): Promise<string | null> {
   const anthropic = getAnthropic();
   let corrected = false;
+  let tier: "fast" | "strong" = route.start;
+  const escalate = (why: string) => {
+    if (tier === "strong") return false;
+    tier = "strong";
+    route.escalatedBecause ??= why;
+    return true;
+  };
 
   for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
-    const response = await anthropic.messages.create({
-      model: AGENT_MODEL,
-      max_tokens: 8000,
-      system,
-      tools: AGENT_TOOLS,
-      messages,
-    });
+    let response: Anthropic.Message;
+    try {
+      response = await anthropic.messages.create({
+        model: tier === "fast" ? FAST_MODEL : AGENT_MODEL,
+        max_tokens: 8000,
+        system: systemBlocks(system),
+        tools: AGENT_TOOLS,
+        messages,
+      });
+    } catch (err) {
+      if (!escalate("помилка моделі")) throw err;
+      i--;
+      continue;
+    }
+    route.calls[tier]++;
+    const used = route.tokens[tier];
+    used.in += response.usage?.input_tokens ?? 0;
+    used.out += response.usage?.output_tokens ?? 0;
+    used.cached += response.usage?.cache_read_input_tokens ?? 0;
 
     if (response.stop_reason === "refusal") {
+      if (escalate("відмова")) {
+        i--;
+        continue;
+      }
       ctx.flags.humanReviewReasons.push("model declined to answer");
       return null;
     }
     if (response.stop_reason === "max_tokens") {
+      if (escalate("відповідь обрізана")) {
+        i--;
+        continue;
+      }
       ctx.flags.humanReviewReasons.push("reply was cut off");
       return null;
     }
@@ -629,10 +695,23 @@ export async function runAgentLoop(
         .flatMap((b) => (b.type === "text" ? [b.text] : []))
         .join("\n")
         .trim();
-      // The reply is checked once; if it breaks a rule the model gets one chance to fix it.
-      const problem = text && !corrected ? replyProblem(text, ctx.flags) : null;
+      if (!text && escalate("порожня відповідь")) {
+        i--;
+        continue;
+      }
+      // The reply is checked once; if it breaks a rule the model gets one chance to fix it —
+      // and a cheap model that broke one hands the fix to the strong one.
+      let problem = text && !corrected ? replyProblem(text, ctx.flags) : null;
+      if (!problem && text && !corrected && tier === "fast") {
+        const odd = unsourcedAmounts(text, sourceText(system, messages));
+        if (odd.length > 0) {
+          problem = `У відповіді є суми (${odd.map((n) => `${n} грн`).join(", ")}), яких немає ні в даних інструментів, ні в розмові. Не вигадуй: назви лише ціни й суми, які дали інструменти (get_price, get_menu, review_order, get_delivery_terms), і перепиши відповідь.`;
+          route.escalatedBecause ??= "суми, яких немає в даних";
+        }
+      }
       if (problem) {
         corrected = true;
+        escalate("відповідь порушила правило");
         messages.push({ role: "assistant", content: response.content });
         messages.push({ role: "user", content: problem });
         continue;
@@ -654,9 +733,11 @@ export async function runAgentLoop(
           content: `Tool error: ${err instanceof Error ? err.message : String(err)}`,
           is_error: true,
         });
+        escalate("помилка інструмента");
       }
     }
     messages.push({ role: "user", content: results });
+    if (i + 1 >= FAST_TOOL_ROUNDS) escalate("забагато кроків");
   }
 
   ctx.flags.humanReviewReasons.push("agent exceeded its tool-use limit");
