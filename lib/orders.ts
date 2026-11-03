@@ -98,6 +98,43 @@ export async function priceOrderLines(db: Db, input: { item_id: string; qty: num
   return { ok: true, lines, total, delivery_fee, grand_total: total + delivery_fee, rules };
 }
 
+// Who a website order is from, when the client didn't come through their personal link:
+// an existing client with the same phone number, or else a new client card made from the form,
+// so the order, the client and their history are always together in the dashboard.
+// A phone match only attaches the order — it is not proof of identity, so the saved details are
+// not overwritten and the order still waits for a person's look.
+const phoneKey = (p: string) => p.replace(/\D/g, "").slice(-9);
+
+export async function resolveWebsiteClient(
+  db: Db,
+  input: { customer_name: string; fop: string; address: string; payment_method: PaymentMethod; phone: string }
+): Promise<{ id: string; how: "phone" | "created" } | null> {
+  const key = phoneKey(input.phone);
+  if (key.length >= 9) {
+    const { data } = await db.from("clients").select("id, phone").limit(5000);
+    const hits = (data ?? []).filter((c) => c.phone && phoneKey(String(c.phone)) === key);
+    if (hits.length === 1) return { id: hits[0].id as string, how: "phone" };
+    if (hits.length > 1) return null; // ambiguous: leave it to a person
+  }
+  const { data: created, error } = await db
+    .from("clients")
+    .insert({
+      business_name: input.customer_name,
+      fop: input.fop,
+      delivery_address: input.address,
+      payment_method: input.payment_method,
+      phone: input.phone,
+      status: "engaged",
+      pipeline_stage: "new_lead",
+      source: "website_form",
+      last_contact_at: new Date().toISOString(),
+    })
+    .select("id")
+    .single();
+  if (error || !created) return null;
+  return { id: created.id as string, how: "created" };
+}
+
 // What we remember about a client between orders. Saved after every order and
 // whenever the client gives us new details.
 export interface ClientProfile {
@@ -150,6 +187,8 @@ export async function announceNewOrder(input: {
   summary: string;
   needsReview: boolean;
   note?: string;
+  // Why a person should look at it first (default: it is not attached to any client).
+  reviewReason?: string;
   // How the order got into the system ("клієнт підтвердив текстом", "👍 на підсумок"…).
   approvalNote?: string;
   amended?: boolean;
@@ -169,7 +208,7 @@ export async function announceNewOrder(input: {
       input.summary.length > 300 ? `${input.summary.slice(0, 297)}...` : input.summary,
       input.note,
       input.approvalNote ? `Підтвердження: ${input.approvalNote}` : "",
-      input.needsReview ? "Потребує перевірки: замовлення не прив'язане до жодного клієнта." : "",
+      input.needsReview ? `Потребує перевірки: ${input.reviewReason ?? "замовлення не прив'язане до жодного клієнта."}` : "",
     ]
       .filter((l): l is string => typeof l === "string")
       .join("\n")

@@ -227,8 +227,8 @@ async function handleStart(msg: TelegramMessage, payload: string) {
 
   const who = client.contact_name ? `, ${client.contact_name}` : "";
   const greeting = isNew
-    ? `Вітаю${who}! Це асистент Peremoga Bakery — дуже приємно познайомитися. Розкажіть, будь ласка, про ваш заклад: як він називається і що плануєте замовляти? З радістю допоможемо з меню, цінами та доставкою.`
-    : `Вітаю${who}! Це асистент Peremoga Bakery, раді вас бачити. Пишіть сюди щодо замовлень — допоможемо з меню, цінами та доставкою.`;
+    ? `Вітаю${who}! Це асистент Peremoga Bakery — дуже приємно познайомитися. Тепер замовляти можна прямо в цьому чаті, до старого повертатися не потрібно. Розкажіть, будь ласка, про ваш заклад: як він називається і що плануєте замовляти? З радістю допоможемо з меню, цінами та доставкою.`
+    : `Вітаю${who}! Це асистент Peremoga Bakery, раді вас бачити. Тепер усі замовлення можна робити прямо в цьому чаті — до старого повертатися не потрібно. Пишіть сюди щодо замовлень — допоможемо з меню, цінами та доставкою.`;
   const sent = await sendTelegramMessage(chatId, greeting);
   if (sent.ok) await logOutgoing(db, client.id, null, greeting, sent.messageId);
   // Came from the site after ordering: the order they just placed is confirmed here, once.

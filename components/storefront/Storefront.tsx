@@ -73,6 +73,8 @@ export default function Storefront({
   const [cart, setCart] = useState<CartMap>({});
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [placedOpen, setPlacedOpen] = useState(false);
+  // After an order from a visitor we didn't know, the card made for them has its own start link.
+  const [ownBotLink, setOwnBotLink] = useState<string | null>(null);
   const [termsOpen, setTermsOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -242,6 +244,7 @@ export default function Storefront({
     setCart({});
     setForm((f) => ({ ...f, notes: "" }));
     setCheckoutOpen(false);
+    if (result.botLink) setOwnBotLink(result.botLink);
     if (telegram) setPlacedOpen(true);
   };
 
@@ -562,7 +565,7 @@ export default function Storefront({
             </DialogHeader>
             <div className="flex flex-col gap-2 pt-2">
               <Button asChild className="gap-2">
-                <a href={telegram.link} target="_blank" rel="noopener noreferrer">
+                <a href={ownBotLink ?? telegram.link} target="_blank" rel="noopener noreferrer">
                   <Send className="h-4 w-4" />
                   {telegram.linked ? "Відкрити чат у Telegram" : "Отримати підтвердження в Telegram"}
                 </a>

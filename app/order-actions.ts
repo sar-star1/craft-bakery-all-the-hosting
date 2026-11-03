@@ -5,7 +5,8 @@ import { z } from "zod";
 import { refTokenToClientId } from "@/lib/clientToken";
 import { createSupabaseServerClient, isSupabaseConfigured } from "@/lib/supabase/server";
 import { confirmSiteOrderInTelegram } from "@/lib/siteOrderNotice";
-import { announceNewOrder, markClientOrdered, priceOrderLines, saveClientProfile } from "@/lib/orders";
+import { announceNewOrder, markClientOrdered, priceOrderLines, resolveWebsiteClient, saveClientProfile } from "@/lib/orders";
+import { getBotLink } from "@/lib/telegram";
 
 const orderSchema = z.object({
   ref: z.string().max(64).optional(),
@@ -23,7 +24,8 @@ const orderSchema = z.object({
 });
 
 export type SubmitOrderInput = z.input<typeof orderSchema>;
-export type SubmitOrderResult = { ok: true } | { ok: false; error: string; issues?: string[] };
+// botLink: for a client card created from this very order, the personal link that ties their Telegram to it.
+export type SubmitOrderResult = { ok: true; botLink?: string } | { ok: false; error: string; issues?: string[] };
 
 // Prices are always re-read from menu_items here — the browser only ever
 // sends item ids and quantities, never trusted amounts.
@@ -52,9 +54,30 @@ export async function submitWebsiteOrder(input: SubmitOrderInput): Promise<Submi
     }
   }
 
-  // An order from a known client's personal link goes straight to "new";
-  // one that can't be tied to a client waits for a human look.
-  const needsReview = !clientId;
+  // Without a personal link the order is still tied to a client card: an existing client with the
+  // same phone, or a new card made from the form. Either way a person looks at it first.
+  let how: "link" | "phone" | "created" | null = clientId ? "link" : null;
+  if (!clientId) {
+    const found = await resolveWebsiteClient(supabase, {
+      customer_name: data.customer_name,
+      fop: data.fop,
+      address: data.address,
+      payment_method: data.payment_method,
+      phone: data.phone,
+    }).catch(() => null);
+    if (found) {
+      clientId = found.id;
+      how = found.how;
+    }
+  }
+  // An order from a known client's personal link goes straight to "new"; anything else waits for a human look.
+  const needsReview = how !== "link";
+  const reviewReason =
+    how === "created"
+      ? "новий клієнт — ми створили для нього картку з даних форми."
+      : how === "phone"
+        ? "клієнта знайдено за номером телефону (без персонального посилання) — перевірте, що це він."
+        : undefined;
 
   const summary = lines.map((l) => `${l.name} ×${l.qty}`).join(", ");
   const { data: inserted, error } = await supabase
@@ -90,8 +113,9 @@ export async function submitWebsiteOrder(input: SubmitOrderInput): Promise<Submi
   // fails, the customer must still see their order as accepted.
   try {
     if (clientId) {
-      // Remember the details so the next order only needs a "still the same?".
-      await saveClientProfile(supabase, clientId, {
+      // Remember the details so the next order only needs a "still the same?" — but never let an
+      // unverified phone match overwrite what we already know about an existing client.
+      if (how !== "phone") await saveClientProfile(supabase, clientId, {
         venue_name: data.customer_name,
         fop: data.fop,
         delivery_address: data.address,
@@ -113,6 +137,7 @@ export async function submitWebsiteOrder(input: SubmitOrderInput): Promise<Submi
       deliveryFee: delivery_fee,
       summary,
       needsReview,
+      reviewReason,
     });
 
     revalidatePath("/");
@@ -121,6 +146,6 @@ export async function submitWebsiteOrder(input: SubmitOrderInput): Promise<Submi
     console.error("post-order side effects failed", err);
   }
   // Already in the bot? Confirm there too. (Not yet? The site offers a button that does it on the first tap.)
-  if (clientId) await confirmSiteOrderInTelegram(supabase, clientId).catch((err) => console.error("telegram confirmation failed", err));
-  return { ok: true };
+  if (clientId && how !== "phone") await confirmSiteOrderInTelegram(supabase, clientId).catch((err) => console.error("telegram confirmation failed", err));
+  return { ok: true, ...(how === "created" && clientId ? { botLink: getBotLink(clientId, false) ?? undefined } : {}) };
 }

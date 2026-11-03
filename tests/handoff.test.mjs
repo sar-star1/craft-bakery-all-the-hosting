@@ -77,10 +77,38 @@ tg.length = 0;
 await processTelegramUpdate(startUpdate(3));
 check("an order from five days ago is not confirmed on a later /start", toChat("555").length === 1 && !toChat("555").some((t) => /Отримали ваше замовлення/.test(t)));
 
-// ---- an order from a visitor without a personal link
+process.env.TELEGRAM_BOT_USERNAME = "PeremogaBot";
+// ---- the greeting says the chat is now the place to order
+reset(null);
+await processTelegramUpdate({ update_id: 10, message: { message_id: 10, text: "/start web", chat: { id: 901, type: "private" }, from: { id: 901, first_name: "Нова" } } });
+check("a brand-new client is told they can order right in this chat", /прямо в цьому чаті/.test(toChat("901")[0] ?? ""), JSON.stringify(toChat("901")));
+reset("555");
+await processTelegramUpdate(startUpdate(11));
+check("a returning client is told the same, and that the old chat is not needed", /прямо в цьому чаті/.test(toChat("555")[0] ?? "") && /до старого повертатися не потрібно/.test(toChat("555")[0] ?? ""), JSON.stringify(toChat("555")));
+
+// ---- every website order ends up with a client card in the dashboard
 reset("777");
 res = await submitWebsiteOrder(order(undefined));
-check("an order without a personal link sends nothing to any client", res.ok === true && toChat("777").length === 0);
+check("an order without a personal link from an unknown phone creates a client card", res.ok === true && tables.clients.length === 2, String(tables.clients.length));
+const made = tables.clients.find((c) => c.id !== CL);
+check("…made from the form (name, ФОП, address, phone, source)", made?.business_name === "Кав'ярня Ліра" && made.fop === "ФОП Лис Т. М." && made.delivery_address === "вул. Садова 5" && made.phone === "+380501110000" && made.source === "website_form", JSON.stringify(made));
+check("…the order is attached to it and waits for a person's look", tables.orders[0].client_id === made?.id && tables.orders[0].status === "pending_review", JSON.stringify(tables.orders[0]));
+check("…the client moved to «first order»", made?.pipeline_stage === "first_order", String(made?.pipeline_stage));
+check("…the thank-you screen gets THEIR personal bot link, so the Telegram tap joins this card", res.botLink === `https://t.me/PeremogaBot?start=m_${made?.id.replace(/-/g, "")}` || res.botLink?.endsWith(`start=m_${made?.id.replace(/-/g, "")}`), String(res.botLink));
+check("…the group alert says it is a new client", tg.some((c) => c.method === "sendMessage" && String(c.body.chat_id) === "-1001" && /новий клієнт/.test(c.body.text ?? "")));
+
+reset("777");
+tables.clients[0] = { ...tables.clients[0], phone: "+38 (050) 111-00-00", fop: "Стара ФОП", delivery_address: "Стара адреса" };
+res = await submitWebsiteOrder(order(undefined));
+check("a phone number that matches an existing client (any formatting) attaches the order to them", tables.clients.length === 1 && tables.orders[0].client_id === CL, JSON.stringify(tables.orders[0]));
+check("…but it still waits for a person, and the saved details are NOT overwritten", tables.orders[0].status === "pending_review" && tables.clients[0].fop === "Стара ФОП" && tables.clients[0].delivery_address === "Стара адреса", JSON.stringify(tables.clients[0]));
+check("…nothing is sent to that client's Telegram, and no personal link is handed out", toChat("777").length === 0 && !res.botLink, JSON.stringify({ chat: toChat("777"), link: res.botLink }));
+
+reset("777");
+tables.clients[0].phone = "+380501110000";
+tables.clients.push({ id: "44444444-4444-4444-8444-444444444444", business_name: "Дубль", telegram_chat_id: null, phone: "050 111 00 00", status: "active", pipeline_stage: "recurring" });
+res = await submitWebsiteOrder(order(undefined));
+check("two clients with that phone → no guess: no card is made and the order stays unattached for a person", res.ok === true && tables.clients.length === 2 && tables.orders[0].client_id === null, JSON.stringify(tables.orders[0]));
 
 const ok = done();
 srv.close();
