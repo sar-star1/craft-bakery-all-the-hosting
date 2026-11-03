@@ -7,6 +7,7 @@ const ROOT = new URL("../../", import.meta.url).pathname;
 
 export async function resolve(specifier, context, next) {
   if (specifier === "next/cache") return next("next/cache.js", context);
+  if (specifier === "next/server") return next("next/server.js", context);
   if (specifier.startsWith("@/")) {
     const base = ROOT + specifier.slice(2);
     for (const cand of [base + ".ts", base + "/index.ts"]) if (existsSync(cand)) return next(pathToFileURL(cand).href, context);

@@ -16,6 +16,7 @@ const ENV_VARS: { name: string; secret: boolean; needed: string }[] = [
   { name: "TELEGRAM_WEBHOOK_SECRET", secret: true, needed: "вебхук" },
   { name: "ANTHROPIC_API_KEY", secret: true, needed: "AI-агент" },
   { name: "SITE_URL", secret: false, needed: "посилання та вебхук" },
+  { name: "STORE_URL", secret: false, needed: "коротка адреса замовлень для клієнтів (необов'язково)" },
   { name: "CRON_SECRET", secret: true, needed: "щоденні/щотижневі завдання" },
   { name: "DASHBOARD_PASSWORD", secret: true, needed: "вхід у дашборд" },
   { name: "WEBSITE_URL", secret: false, needed: "редактор публічного сайту" },

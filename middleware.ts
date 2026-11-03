@@ -5,7 +5,32 @@ import { SESSION_COOKIE, safeEqual, sessionToken } from "@/lib/authToken";
 // (clients place orders there), the Telegram webhook and the cron routes (both
 // authenticate themselves with their own secrets), the login page, and the
 // read-only published website text the public site builds from.
+// The short ordering domain (STORE_URL) shows the storefront and nothing else: its front page is
+// the storefront, and any dashboard address there goes back to it.
+function isStoreHost(request: NextRequest): boolean {
+  const store = process.env.STORE_URL;
+  if (!store) return false;
+  try {
+    const want = new URL(store).host.toLowerCase();
+    const got = (request.headers.get("host") ?? "").toLowerCase();
+    return got === want;
+  } catch {
+    return false;
+  }
+}
+
 export async function middleware(request: NextRequest) {
+  if (isStoreHost(request)) {
+    const url = request.nextUrl.clone();
+    if (url.pathname === "/") {
+      url.pathname = "/order";
+      return NextResponse.rewrite(url);
+    }
+    url.pathname = "/";
+    url.search = "";
+    return NextResponse.redirect(url);
+  }
+
   const password = process.env.DASHBOARD_PASSWORD;
   const hasRealData = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
 
