@@ -11,6 +11,8 @@ import StatsBar from "./StatsBar";
 import KanbanBoard from "./KanbanBoard";
 import DetailPanel from "./DetailPanel";
 import NewOrderForm from "./NewOrderForm";
+import { dt } from "@/lib/dashText";
+import { SOURCE_LABEL } from "@/lib/i18n";
 
 export default function Dashboard({
   initialOrders,
@@ -27,6 +29,8 @@ export default function Dashboard({
   const [orders, setOrders] = useState(initialOrders);
   const [openOrderId, setOpenOrderId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [query, setQuery] = useState("");
+  const [source, setSource] = useState<"" | Order["source"]>("");
   const [, startTransition] = useTransition();
 
   // Re-sync whenever the server re-fetches after a mutation revalidates "/".
@@ -105,6 +109,16 @@ export default function Dashboard({
 
   const openOrder = orders.find((o) => o.id === openOrderId) ?? null;
 
+  const q = query.trim().toLowerCase();
+  const visible = orders.filter(
+    (o) =>
+      (!source || o.source === source) &&
+      (!q ||
+        [o.customer_name, o.item_summary_uk, o.item_summary_en, o.customer_contact].some((v) => (v ?? "").toLowerCase().includes(q)))
+  );
+  const filtering = Boolean(q || source);
+  const d = dt(lang);
+
   return (
     <div className="min-h-screen bg-[#FAF6EF] flex text-stone-900">
       <Sidebar lang={lang} setLang={setLang} />
@@ -133,8 +147,44 @@ export default function Dashboard({
         </div>
 
         <StatsBar orders={orders} lang={lang} />
+
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={d.searchOrders}
+            className="w-full sm:w-72 border border-stone-200 bg-white rounded px-3 py-1.5 text-sm"
+          />
+          <select
+            value={source}
+            onChange={(e) => setSource(e.target.value as typeof source)}
+            className="border border-stone-200 bg-white rounded px-2 py-1.5 text-sm text-stone-700"
+          >
+            <option value="">{d.allSources}</option>
+            {(["telegram", "website_form", "manual"] as const).map((s) => (
+              <option key={s} value={s}>
+                {SOURCE_LABEL[lang][s]}
+              </option>
+            ))}
+          </select>
+          {filtering && (
+            <>
+              <span className="text-[12px] text-stone-500">{d.found(visible.length)}</span>
+              <button
+                onClick={() => {
+                  setQuery("");
+                  setSource("");
+                }}
+                className="text-[12px] text-stone-400 hover:text-stone-700 underline"
+              >
+                {d.clear}
+              </button>
+            </>
+          )}
+        </div>
+
         <KanbanBoard
-          orders={orders}
+          orders={visible}
           lang={lang}
           onAdvance={advance}
           onBack={back}

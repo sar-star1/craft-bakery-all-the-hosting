@@ -19,6 +19,8 @@ import Sidebar from "./Sidebar";
 import LangToggle from "./LangToggle";
 import MessageThread from "./MessageThread";
 import PendingReplyCard from "./PendingReplyCard";
+import ClientOrders from "./ClientOrders";
+import { dt } from "@/lib/dashText";
 
 export default function ClientDetail({
   client,
@@ -49,6 +51,10 @@ export default function ClientDetail({
   const router = useRouter();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [alsoOrders, setAlsoOrders] = useState(false);
+  const waiting = pendingReplies.filter((r) => r.status === "awaiting_approval").length;
+  // The page is split into tabs so it is not one long column; drafts waiting for a ✅ open the chat first.
+  const [tab, setTab] = useState<"overview" | "orders" | "chat" | "agent">(waiting > 0 ? "chat" : "overview");
+  const d = dt(lang);
   const t = STR[lang];
 
   const handleStageChange = (next: Client["pipeline_stage"]) => {
@@ -120,6 +126,34 @@ export default function ClientDetail({
           </div>
         </div>
 
+        <nav className="flex gap-1 border-b border-stone-200 mb-6 overflow-x-auto" role="tablist">
+          {(
+            [
+              ["overview", d.tabOverview, null],
+              ["orders", d.tabOrders, orders.length],
+              ["chat", d.tabChat, waiting > 0 ? waiting : null],
+              ...(events.length > 0 ? ([["agent", d.tabAgent, null]] as const) : []),
+            ] as const
+          ).map(([id, label, badge]) => (
+            <button
+              key={id}
+              role="tab"
+              aria-selected={tab === id}
+              onClick={() => setTab(id)}
+              className={`px-3 py-2 text-sm whitespace-nowrap border-b-2 -mb-px ${
+                tab === id ? "border-stone-900 text-stone-900 font-medium" : "border-transparent text-stone-500 hover:text-stone-800"
+              }`}
+            >
+              {label}
+              {badge !== null && (
+                <span className={`ml-1.5 text-[11px] px-1.5 rounded-full ${id === "chat" ? "bg-amber-100 text-amber-900" : "bg-stone-100 text-stone-500"}`}>{badge}</span>
+              )}
+            </button>
+          ))}
+        </nav>
+
+        {tab === "overview" && (
+          <>
         <div className="grid grid-cols-2 gap-4 mb-6 text-sm">
           <div>
             <p className="text-stone-400 text-[11px] uppercase tracking-wide mb-1">
@@ -170,7 +204,11 @@ export default function ClientDetail({
         )}
 
         {(orderLink || botLink) && <ClientLinks orderLink={orderLink} botLink={botLink} inBot={Boolean(client.telegram_chat_id)} />}
+          </>
+        )}
 
+        {tab === "chat" && (
+          <>
         <section className="mb-8">
           <h2 className="font-serif text-lg mb-3">{t.clientMessages}</h2>
           <MessageThread clientId={client.id} messages={messages} paused={Boolean(client.agent_paused)} lang={lang} sampleMode={sampleMode} />
@@ -197,39 +235,13 @@ export default function ClientDetail({
           )}
         </section>
 
-        <section>
-          <h2 className="font-serif text-lg mb-3">{t.clientOrderHistory}</h2>
-          {orders.length === 0 ? (
-            <p className="text-stone-400 text-sm">{t.clientNoOrders}</p>
-          ) : (
-            <div className="space-y-2">
-              {orders.map((order) => {
-                const summary = lang === "en" ? order.item_summary_en ?? order.item_summary_uk : order.item_summary_uk;
-                return (
-                  <div
-                    key={order.id}
-                    className="bg-white rounded-md border border-stone-200 p-3 flex items-center justify-between gap-3"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-sm text-stone-800 truncate">{summary}</p>
-                      <p className="text-[12px] text-stone-400 mt-0.5">
-                        {formatDateTime(order.created_at, lang)}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-sm font-medium text-stone-700">
-                        {formatMoney(order.total_amount)}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </section>
+          </>
+        )}
 
-        {events.length > 0 && (
-          <section className="mt-8">
+        {tab === "orders" && <ClientOrders orders={orders} lang={lang} />}
+
+        {tab === "agent" && events.length > 0 && (
+          <section>
             <h2 className="font-serif text-lg mb-1">{lang === "uk" ? "Журнал агента" : "Agent log"}</h2>
             <p className="text-[12px] text-stone-400 mb-2">
               {lang === "uk" ? "Що агент робив у розмові: інструменти, реакції, замовлення." : "What the agent did: tools, reactions, orders."}
@@ -245,6 +257,7 @@ export default function ClientDetail({
           </section>
         )}
 
+        {tab === "overview" && (
         <section className="mt-10 pt-6 border-t border-stone-200">
           {!confirmingDelete ? (
             <button onClick={() => setConfirmingDelete(true)} className="text-[12px] text-stone-400 hover:text-rose-700">
@@ -272,6 +285,7 @@ export default function ClientDetail({
             </div>
           )}
         </section>
+        )}
       </main>
     </div>
   );
