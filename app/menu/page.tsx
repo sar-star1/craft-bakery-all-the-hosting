@@ -19,8 +19,8 @@ export default async function MenuPage() {
 
   const supabase = createSupabaseServerClient();
   const [{ data: categories, error }, { data: menuItems }, { data: siteContent }] = await Promise.all([
-    supabase.from("menu_categories").select("*").order("sort_order", { ascending: true }),
-    supabase.from("menu_items").select("*").order("sort_order", { ascending: true }),
+    supabase.from("menu_categories").select("*").order("sort_order", { ascending: true }).order("created_at", { ascending: true }),
+    supabase.from("menu_items").select("*").order("sort_order", { ascending: true }).order("created_at", { ascending: true }),
     supabase.from("site_content").select("*"),
   ]);
 
