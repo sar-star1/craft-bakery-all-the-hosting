@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { deleteMenuCategory, deleteMenuItem } from "@/app/actions";
+import { deleteMenuCategory, deleteMenuItem, moveMenuCategory, moveMenuItem } from "@/app/actions";
+import { bySortOrder, moveWithin } from "@/lib/menuOrder";
 import type { Lang } from "@/lib/i18n";
 import { STR } from "@/lib/i18n";
 import type { MenuCategory, MenuItem, SiteContent } from "@/lib/types";
@@ -46,6 +47,25 @@ export default function MenuManager({
     });
   };
 
+  // ▲▼: renumber locally right away, save in the background.
+  const moveItem = (id: string, dir: -1 | 1) => {
+    const item = items.find((i) => i.id === id);
+    if (!item) return;
+    const updates = moveWithin(items.filter((i) => i.category_id === item.category_id), id, dir);
+    if (updates.length === 0) return;
+    const next = new Map(updates.map((u) => [u.id, u.sort_order]));
+    setItems((prev) => prev.map((i) => (next.has(i.id) ? { ...i, sort_order: next.get(i.id)! } : i)));
+    if (!sampleMode) moveMenuItem(id, dir);
+  };
+
+  const moveCategory = (id: string, dir: -1 | 1) => {
+    const updates = moveWithin(categories, id, dir);
+    if (updates.length === 0) return;
+    const next = new Map(updates.map((u) => [u.id, u.sort_order]));
+    setCategories((prev) => prev.map((c) => (next.has(c.id) ? { ...c, sort_order: next.get(c.id)! } : c)));
+    if (!sampleMode) moveMenuCategory(id, dir);
+  };
+
   const handleDeleteItem = (id: string) => {
     if (!confirm(t.deleteItemConfirm)) return;
     setItems((prev) => prev.filter((i) => i.id !== id));
@@ -88,10 +108,10 @@ export default function MenuManager({
         </div>
 
         <div className="space-y-8 mb-10">
-          {categories.map((category) => {
+          {[...categories].sort(bySortOrder).map((category, catIndex, catList) => {
             const categoryName = lang === "en" ? category.name_en ?? category.name_uk : category.name_uk;
             const categoryNote = lang === "en" ? category.note_en : category.note_uk;
-            const categoryItems = items.filter((i) => i.category_id === category.id);
+            const categoryItems = items.filter((i) => i.category_id === category.id).sort(bySortOrder);
 
             return (
               <section key={category.id}>
@@ -104,6 +124,13 @@ export default function MenuManager({
                     </p>
                   </div>
                   <div className="flex gap-1 shrink-0">
+                    <ArrowButtons
+                      onUp={() => moveCategory(category.id, -1)}
+                      onDown={() => moveCategory(category.id, 1)}
+                      first={catIndex === 0}
+                      last={catIndex === catList.length - 1}
+                      lang={lang}
+                    />
                     <button
                       onClick={() => setEditingCategory(category)}
                       className="text-[12px] text-stone-500 hover:text-stone-900 px-2 py-1"
@@ -123,7 +150,7 @@ export default function MenuManager({
                   <p className="text-stone-400 text-sm mb-2">{t.menuEmpty}</p>
                 ) : (
                   <div className="space-y-2 mb-2">
-                    {categoryItems.map((item) => {
+                    {categoryItems.map((item, itemIndex) => {
                       const name = lang === "en" ? item.name_en ?? item.name_uk : item.name_uk;
                       const description = lang === "en" ? item.description_en : item.description_uk;
                       return (
@@ -175,7 +202,14 @@ export default function MenuManager({
                             )}
                             <p className="text-sm font-medium text-stone-700">{formatMoney(item.price)}</p>
                           </div>
-                          <div className="flex gap-1 shrink-0">
+                          <div className="flex gap-1 shrink-0 items-center">
+                            <ArrowButtons
+                              onUp={() => moveItem(item.id, -1)}
+                              onDown={() => moveItem(item.id, 1)}
+                              first={itemIndex === 0}
+                              last={itemIndex === categoryItems.length - 1}
+                              lang={lang}
+                            />
                             <button
                               onClick={() => setEditingItem({ item, categoryId: category.id })}
                               className="text-[12px] text-stone-500 hover:text-stone-900 px-2 py-1"
@@ -231,5 +265,20 @@ export default function MenuManager({
         />
       )}
     </div>
+  );
+}
+
+// ▲▼ to change the order of an item in its category, or of a category on the menu.
+function ArrowButtons({ onUp, onDown, first, last, lang }: { onUp: () => void; onDown: () => void; first: boolean; last: boolean; lang: Lang }) {
+  const cls = "w-6 h-6 rounded border border-stone-200 text-stone-500 hover:bg-stone-50 disabled:opacity-25 disabled:cursor-default text-[11px] leading-none";
+  return (
+    <span className="flex gap-1 mr-1">
+      <button type="button" onClick={onUp} disabled={first} className={cls} title={lang === "uk" ? "Вище" : "Move up"} aria-label={lang === "uk" ? "Перемістити вище" : "Move up"}>
+        ▲
+      </button>
+      <button type="button" onClick={onDown} disabled={last} className={cls} title={lang === "uk" ? "Нижче" : "Move down"} aria-label={lang === "uk" ? "Перемістити нижче" : "Move down"}>
+        ▼
+      </button>
+    </span>
   );
 }

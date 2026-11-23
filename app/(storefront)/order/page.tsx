@@ -37,8 +37,8 @@ export default async function OrderPage({
   const clientId = refTokenToClientId(ref);
 
   const [{ data: categories }, { data: items }, { data: content }, clientRow, rules] = await Promise.all([
-    supabase.from("menu_categories").select("*"),
-    supabase.from("menu_items").select("*"),
+    supabase.from("menu_categories").select("*").order("created_at", { ascending: true }),
+    supabase.from("menu_items").select("*").order("created_at", { ascending: true }),
     supabase.from("site_content").select("*"),
     clientId
       ? supabase.from("clients").select("business_name, fop, delivery_address, payment_method, phone, telegram_chat_id").eq("id", clientId).maybeSingle()

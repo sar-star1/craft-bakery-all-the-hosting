@@ -1,6 +1,8 @@
 "use server";
 
 import { after } from "next/server";
+import { moveWithin, nextSortOrder, type Sortable } from "@/lib/menuOrder";
+import { MAX_PHOTO_BYTES } from "@/lib/shrinkImage";
 import { revalidatePath } from "next/cache";
 import { createSeasonalOfferDrafts, type OfferSegment } from "@/lib/jobs";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -264,6 +266,8 @@ export async function saveMenuItem(
 
   let photoUrl = existingPhotoUrl;
   if (photoFile && photoFile.size > 0) {
+    if (!photoFile.type.startsWith("image/")) return { error: "Файл має бути зображенням (JPG або PNG)." };
+    if (photoFile.size > MAX_PHOTO_BYTES) return { error: "Фото завелике (понад 4 МБ). Оберіть менше або стисніть його." };
     const ext = photoFile.name.split(".").pop() || "jpg";
     const path = `${crypto.randomUUID()}.${ext}`;
     const { error: uploadError } = await supabase.storage
@@ -291,14 +295,44 @@ export async function saveMenuItem(
     is_active: isActive,
   };
 
+  // A new item (or one moved to another category) goes to the end of its category, not onto position 0.
+  let sortOrder: number | undefined;
+  const current = id ? (await supabase.from("menu_items").select("category_id").eq("id", id).maybeSingle()).data : null;
+  if (!id || current?.category_id !== categoryId) {
+    const { data: siblings } = await supabase.from("menu_items").select("sort_order").eq("category_id", categoryId);
+    sortOrder = nextSortOrder((siblings ?? []) as { sort_order: number }[]);
+  }
+
   const { error } = id
-    ? await supabase.from("menu_items").update(record).eq("id", id)
-    : await supabase.from("menu_items").insert(record);
+    ? await supabase.from("menu_items").update({ ...record, ...(sortOrder !== undefined ? { sort_order: sortOrder } : {}) }).eq("id", id)
+    : await supabase.from("menu_items").insert({ ...record, sort_order: sortOrder ?? 0 });
 
   if (error) return { error: error.message };
 
   revalidatePath("/menu");
   return {};
+}
+
+// Moves a menu item one place up or down inside its category.
+export async function moveMenuItem(id: string, dir: -1 | 1) {
+  await requireAdmin();
+  const supabase = createSupabaseServerClient();
+  const { data: item } = await supabase.from("menu_items").select("category_id").eq("id", id).maybeSingle();
+  if (!item) return;
+  const { data: rows } = await supabase.from("menu_items").select("id, sort_order, created_at").eq("category_id", item.category_id);
+  await Promise.all(moveWithin((rows ?? []) as Sortable[], id, dir).map((u) => supabase.from("menu_items").update({ sort_order: u.sort_order }).eq("id", u.id)));
+  revalidatePath("/menu");
+  revalidatePath("/order");
+}
+
+// Moves a whole category one place up or down on the menu.
+export async function moveMenuCategory(id: string, dir: -1 | 1) {
+  await requireAdmin();
+  const supabase = createSupabaseServerClient();
+  const { data: rows } = await supabase.from("menu_categories").select("id, sort_order, created_at");
+  await Promise.all(moveWithin((rows ?? []) as Sortable[], id, dir).map((u) => supabase.from("menu_categories").update({ sort_order: u.sort_order }).eq("id", u.id)));
+  revalidatePath("/menu");
+  revalidatePath("/order");
 }
 
 export async function deleteMenuItem(id: string) {
@@ -339,9 +373,10 @@ export async function saveMenuCategory(
     note_en: noteEn || null,
   };
 
+  const { data: others } = id ? { data: null } : await supabase.from("menu_categories").select("sort_order");
   const { error } = id
     ? await supabase.from("menu_categories").update(record).eq("id", id)
-    : await supabase.from("menu_categories").insert(record);
+    : await supabase.from("menu_categories").insert({ ...record, sort_order: nextSortOrder((others ?? []) as { sort_order: number }[]) });
 
   if (error) return { error: error.message };
 

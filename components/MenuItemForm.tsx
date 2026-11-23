@@ -5,6 +5,7 @@ import { saveMenuItem, type SaveMenuItemState } from "@/app/actions";
 import type { Lang } from "@/lib/i18n";
 import { STR } from "@/lib/i18n";
 import type { MenuCategory, MenuItem } from "@/lib/types";
+import { MAX_PHOTO_BYTES, shrinkImage } from "@/lib/shrinkImage";
 
 const initialState: SaveMenuItemState = {};
 
@@ -29,6 +30,30 @@ export default function MenuItemForm({
   const [state, formAction, pending] = useActionState(saveMenuItem, initialState);
   const [mockError, setMockError] = useState<string | undefined>();
   const formRef = useRef<HTMLFormElement>(null);
+  // Big phone photos are shrunk in the browser before upload (the limit is 4 MB).
+  const [preparing, setPreparing] = useState(false);
+  const [photoNote, setPhotoNote] = useState<{ text: string; bad?: boolean } | null>(null);
+
+  const onPhotoChosen = async (input: HTMLInputElement) => {
+    const file = input.files?.[0];
+    setPhotoNote(null);
+    if (!file) return;
+    setPreparing(true);
+    const small = await shrinkImage(file);
+    setPreparing(false);
+    const mb = (small.size / 1024 / 1024).toFixed(1);
+    if (small.size > MAX_PHOTO_BYTES) {
+      input.value = "";
+      setPhotoNote({ bad: true, text: lang === "uk" ? `Фото завелике (${mb} МБ, максимум 4 МБ). Оберіть інше.` : `Photo too large (${mb} MB, max 4 MB). Choose another.` });
+      return;
+    }
+    if (small !== file) {
+      const dt = new DataTransfer();
+      dt.items.add(small);
+      input.files = dt.files;
+    }
+    setPhotoNote({ text: lang === "uk" ? `Фото готове до завантаження (${mb} МБ)` : `Photo ready (${mb} MB)` });
+  };
 
   useEffect(() => {
     if (sampleMode) return;
@@ -247,7 +272,12 @@ export default function MenuItemForm({
                 className="w-20 h-20 object-cover rounded mb-2 border border-stone-200"
               />
             )}
-            <input type="file" name="photo" accept="image/*" disabled={sampleMode} className="w-full text-sm" />
+            <input type="file" name="photo" accept="image/*" onChange={(e) => onPhotoChosen(e.currentTarget)} className="w-full text-sm" />
+            <p className={`text-[12px] mt-1 ${photoNote?.bad ? "text-red-600" : "text-stone-400"}`}>
+              {preparing
+                ? lang === "uk" ? "Готуємо фото…" : "Preparing the photo…"
+                : photoNote?.text ?? (lang === "uk" ? "JPG або PNG. Великі фото стискаються автоматично (максимум 4 МБ)." : "JPG or PNG. Large photos are shrunk automatically (max 4 MB).")}
+            </p>
           </div>
         </div>
 
@@ -265,7 +295,7 @@ export default function MenuItemForm({
           </button>
           <button
             type="submit"
-            disabled={pending}
+            disabled={pending || preparing}
             className="flex-1 text-sm px-3 py-2 rounded bg-stone-900 text-white hover:bg-stone-800 disabled:opacity-60"
           >
             {t.saveItem}
