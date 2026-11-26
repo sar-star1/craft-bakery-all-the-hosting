@@ -293,6 +293,7 @@ export async function saveMenuItem(
     min_order_override: minOrderOverrideRaw ? Number(minOrderOverrideRaw) : null,
     photo_url: photoUrl,
     is_active: isActive,
+    show_in_new: formData.get("show_in_new") === "on",
   };
 
   // A new item (or one moved to another category) goes to the end of its category, not onto position 0.

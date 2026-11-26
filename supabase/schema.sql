@@ -103,6 +103,7 @@ create table menu_items (
   min_order_override integer,             -- overrides the category's min_order for this item
   photo_url text,                         -- public URL, either in `menu-photos` or hotlinked
   is_active boolean not null default true, -- hide without deleting
+  show_in_new boolean not null default false, -- also shown in the «Новинки» section, while staying in its own category
   sort_order integer not null default 0,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
