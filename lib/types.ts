@@ -189,6 +189,8 @@ export interface MenuItem {
   min_order_override: number | null;
   photo_url: string | null;
   is_active: boolean;
+  // Also listed in the «Новинки» section of the menu while staying in its own category.
+  show_in_new?: boolean;
   sort_order: number;
   created_at: string;
   updated_at: string;

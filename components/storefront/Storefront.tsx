@@ -109,14 +109,14 @@ export default function Storefront({
   const promoItems = useMemo(
     () =>
       promo.active
-        ? categories.flatMap((cat) => cat.items.filter((i) => i.promo).map((item) => ({ category: cat.name, item })))
+        ? categories.flatMap((cat) => cat.items.filter((i) => i.promo && !i.copyFromOtherCategory).map((item) => ({ category: cat.name, item })))
         : [],
     [categories, promo]
   );
 
   const itemById = useMemo(() => {
     const map = new Map<string, { item: StoreItem; category: string }>();
-    for (const cat of categories) for (const item of cat.items) map.set(item.id, { item, category: cat.name });
+    for (const cat of categories) for (const item of cat.items) if (!item.copyFromOtherCategory) map.set(item.id, { item, category: cat.name });
     return map;
   }, [categories]);
 
@@ -155,7 +155,7 @@ export default function Storefront({
     for (const cat of categories) {
       let qty = 0;
       for (const item of cat.items) {
-        if (item.minOrder) continue;
+        if (item.minOrder || item.copyFromOtherCategory) continue;
         qty += cart[item.id] ?? 0;
       }
       map.set(cat.id, { qty, min: cat.minOrder, ok: qty === 0 || qty >= cat.minOrder });

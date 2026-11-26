@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { deleteMenuCategory, deleteMenuItem, moveMenuCategory, moveMenuItem } from "@/app/actions";
 import { bySortOrder, moveWithin } from "@/lib/menuOrder";
+import { isNewSection } from "@/lib/storefront";
 import type { Lang } from "@/lib/i18n";
 import { STR } from "@/lib/i18n";
 import type { MenuCategory, MenuItem, SiteContent } from "@/lib/types";
@@ -184,6 +185,11 @@ export default function MenuManager({
                                   {item.promo_label}
                                 </span>
                               )}
+                                              {item.show_in_new && (
+                                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-sky-100 text-sky-900 shrink-0">
+                                  {lang === "uk" ? "★ у Новинках" : "★ in New"}
+                                </span>
+                              )}
                               {!item.is_active && (
                                 <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-stone-200 text-stone-500 shrink-0">
                                   {t.inactiveLabel}
@@ -227,6 +233,10 @@ export default function MenuManager({
                       );
                     })}
                   </div>
+                )}
+
+                {isNewSection(category.name_uk) && (
+                  <ExtraNew items={items.filter((i) => i.show_in_new && i.is_active && i.category_id !== category.id)} categories={categories} lang={lang} />
                 )}
 
                 <button
@@ -280,5 +290,17 @@ function ArrowButtons({ onUp, onDown, first, last, lang }: { onUp: () => void; o
         ▼
       </button>
     </span>
+  );
+}
+
+// In the «Новинки» section: the items of other categories that are also shown there (flagged in their form).
+function ExtraNew({ items, categories, lang }: { items: MenuItem[]; categories: MenuCategory[]; lang: Lang }) {
+  if (items.length === 0) return null;
+  const home = (i: MenuItem) => categories.find((c) => c.id === i.category_id)?.name_uk ?? "";
+  return (
+    <p className="text-[12px] text-stone-500 bg-sky-50 border border-sky-100 rounded px-3 py-2 mb-2">
+      {lang === "uk" ? "Також показуються тут (зі своїх категорій): " : "Also shown here (from their own categories): "}
+      {items.map((i) => `${i.name_uk} (${home(i)})`).join(", ")}
+    </p>
   );
 }

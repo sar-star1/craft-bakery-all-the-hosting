@@ -112,6 +112,7 @@ export default function MenuItemForm({
                   min_order_override: minOrderOverrideRaw ? Number(minOrderOverrideRaw) : null,
                   photo_url: item?.photo_url ?? null,
                   is_active: formData.get("is_active") === "on",
+                  show_in_new: formData.get("show_in_new") === "on",
                   sort_order: item?.sort_order ?? 0,
                   created_at: item?.created_at ?? now,
                   updated_at: now,
@@ -261,6 +262,18 @@ export default function MenuItemForm({
             <input type="checkbox" name="is_active" defaultChecked={item?.is_active ?? true} />
             {t.fItemActive}
           </label>
+
+          <div>
+            <label className="flex items-center gap-2 text-sm text-stone-600">
+              <input type="checkbox" name="show_in_new" defaultChecked={item?.show_in_new ?? false} />
+              {lang === "uk" ? "Показувати також у «Новинках»" : "Also show in “New”"}
+            </label>
+            <p className="text-[12px] text-stone-400 mt-1 ml-6">
+              {lang === "uk"
+                ? "Товар лишається у своїй категорії (зі своїм мінімальним замовленням) і додатково з'являється в «Новинках». Приберіть галочку, коли він перестане бути новинкою."
+                : "The item stays in its own category (and its minimum) and also appears under “New”. Untick when it is no longer new."}
+            </p>
+          </div>
 
           <div>
             <label className="text-[12px] text-stone-500 block mb-1">{t.fItemPhoto}</label>
