@@ -33,5 +33,31 @@ check("without a «Новинки» category a section is made up at the top, wi
 const none = buildStoreData([cat("c", "Торти", 1)], [item("i5", "c", "Медовик")], []);
 check("nothing flagged and no such category → no «Новинки» section", !none.categories.some((c) => c.name === "Новинки"));
 
+// order inside «Новинки»: own items and copies share one list, moved with ▲▼
+const { newSectionItems, moveInNewSection } = await import("../lib/menuOrder.ts");
+const apply = (list, updates) => list.map((i) => { const u = updates.find((x) => x.id === i.id); return u ? { ...i, [u.field]: u.value } : i; });
+const names = (cs, its) => newSectionItems(cs, its, "n").map((i) => i.name_uk).join();
+let cur = items.map((i) => ({ ...i }));
+check("unplaced copies go after the section's own items", names(cats, cur) === "Тарт з малиною,Мигдальний");
+let up = moveInNewSection(newSectionItems(cats, cur, "n"), "n", "i3", -1);
+cur = apply(cur, up);
+check("a copy can be moved above an own item", names(cats, cur) === "Мигдальний,Тарт з малиною");
+const afterMove = buildStoreData(cats, cur, []);
+check("the website shows the same order", afterMove.categories.find((c) => c.name === "Новинки").items.map((i) => i.name).join() === "Мигдальний,Тарт з малиною");
+check("the copy is still marked as a copy, the own item is not", afterMove.categories[0].items[0].copyFromOtherCategory === true && !afterMove.categories[0].items[1].copyFromOtherCategory);
+check("moving past the ends changes nothing", moveInNewSection(newSectionItems(cats, cur, "n"), "n", "i3", -1).length === 0 && moveInNewSection(newSectionItems(cats, cur, "n"), "n", "i1", 1).length === 0);
+// two copies from different categories, plus own
+const more = [...cur, item("i6", "t", "Чізкейк", { show_in_new: true })];
+check("a newly flagged item lands last", names(cats, more) === "Мигдальний,Тарт з малиною,Чізкейк");
+up = moveInNewSection(newSectionItems(cats, more, "n"), "n", "i6", -1);
+check("moving renumbers own items via sort_order and copies via new_sort_order", up.some((u) => u.id === "i1" && u.field === "sort_order") && up.some((u) => u.id === "i6" && u.field === "new_sort_order"));
+check("…and the new order holds", names(cats, apply(more, up)) === "Мигдальний,Чізкейк,Тарт з малиною");
+// without a «Новинки» category only copies are ordered, with new_sort_order
+const solo = [item("a", "c", "А", { show_in_new: true }), item("b", "t", "Б", { show_in_new: true })];
+const soloCats = [cat("c", "Круасани", 1), cat("t", "Торти", 2)];
+const sl = newSectionItems(soloCats, solo, undefined);
+const su = moveInNewSection(sl, undefined, "b", -1);
+check("with no «Новинки» category copies are still orderable", sl.map((i) => i.name_uk).join() === "А,Б" && newSectionItems(soloCats, apply(solo, su), undefined).map((i) => i.name_uk).join() === "Б,А");
+
 const ok = done();
 process.exit(ok ? 0 : 1);

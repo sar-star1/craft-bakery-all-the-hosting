@@ -8,6 +8,7 @@ import type {
   PromoBannerContent,
   SiteContent,
 } from "./types";
+import { newSectionItems } from "./menuOrder";
 
 export interface StoreItem {
   id: string;
@@ -75,15 +76,11 @@ export function buildStoreData(
 ): StoreData {
   const sortedCategories = [...categories].sort((a, b) => a.sort_order - b.sort_order);
   const newSection = sortedCategories.find((c) => isNewSection(c.name_uk));
-  // Items flagged «show in Новинки» that live in another category (oldest category order first).
-  const flagged = sortedCategories
-    .filter((c) => c.id !== newSection?.id)
-    .flatMap((c) =>
-      items
-        .filter((i) => i.category_id === c.id && i.is_active && i.show_in_new)
-        .sort((a, b) => a.sort_order - b.sort_order)
-        .map((i): StoreItem => ({ ...toStoreItem(i), copyFromOtherCategory: true }))
-    );
+  // «Новинки»: its own items plus the flagged items of other categories, in the order set in the dashboard.
+  const newList = newSectionItems(sortedCategories, items, newSection?.id).filter((i) => i.is_active);
+  const asStoreItem = (i: MenuItem, homeId: string | undefined): StoreItem =>
+    i.category_id === homeId ? toStoreItem(i) : { ...toStoreItem(i), copyFromOtherCategory: true };
+  const flagged = newList.map((i) => asStoreItem(i, newSection?.id));
 
   const storeCategories = sortedCategories
     .map((cat): StoreCategory => ({
@@ -91,13 +88,13 @@ export function buildStoreData(
       name: cat.name_uk,
       minOrder: cat.min_order,
       note: cat.note_uk,
-      items: [
-        ...items
-          .filter((i) => i.category_id === cat.id && i.is_active)
-          .sort((a, b) => a.sort_order - b.sort_order)
-          .map(toStoreItem),
-        ...(cat.id === newSection?.id ? flagged : []),
-      ],
+      items:
+        cat.id === newSection?.id
+          ? flagged
+          : items
+              .filter((i) => i.category_id === cat.id && i.is_active)
+              .sort((a, b) => a.sort_order - b.sort_order)
+              .map(toStoreItem),
     }))
     .filter((c) => c.items.length > 0);
 

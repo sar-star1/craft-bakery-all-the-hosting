@@ -104,6 +104,7 @@ create table menu_items (
   photo_url text,                         -- public URL, either in `menu-photos` or hotlinked
   is_active boolean not null default true, -- hide without deleting
   show_in_new boolean not null default false, -- also shown in the «Новинки» section, while staying in its own category
+  new_sort_order integer,                  -- place among the «Новинки» entries when shown there as a copy (null = last)
   sort_order integer not null default 0,
   created_at timestamptz default now(),
   updated_at timestamptz default now()

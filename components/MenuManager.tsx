@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { deleteMenuCategory, deleteMenuItem, moveMenuCategory, moveMenuItem } from "@/app/actions";
-import { bySortOrder, moveWithin } from "@/lib/menuOrder";
+import { deleteMenuCategory, deleteMenuItem, moveMenuCategory, moveMenuItem, moveNewSectionItem } from "@/app/actions";
+import { bySortOrder, moveInNewSection, moveWithin, newSectionItems } from "@/lib/menuOrder";
 import { isNewSection } from "@/lib/storefront";
 import type { Lang } from "@/lib/i18n";
 import { STR } from "@/lib/i18n";
@@ -49,9 +49,18 @@ export default function MenuManager({
   };
 
   // ▲▼: renumber locally right away, save in the background.
-  const moveItem = (id: string, dir: -1 | 1) => {
+  const moveItem = (id: string, dir: -1 | 1, inNewSection = false) => {
     const item = items.find((i) => i.id === id);
     if (!item) return;
+    // In «Новинки» an item's own and copied entries share one order.
+    if (inNewSection) {
+      const newCat = categories.find((c) => isNewSection(c.name_uk));
+      const updates = moveInNewSection(newSectionItems(categories, items, newCat?.id), newCat?.id, id, dir);
+      if (updates.length === 0) return;
+      setItems((prev) => prev.map((i) => { const u = updates.find((x) => x.id === i.id); return u ? { ...i, [u.field]: u.value } : i; }));
+      if (!sampleMode) moveNewSectionItem(id, dir);
+      return;
+    }
     const updates = moveWithin(items.filter((i) => i.category_id === item.category_id), id, dir);
     if (updates.length === 0) return;
     const next = new Map(updates.map((u) => [u.id, u.sort_order]));
@@ -112,7 +121,11 @@ export default function MenuManager({
           {[...categories].sort(bySortOrder).map((category, catIndex, catList) => {
             const categoryName = lang === "en" ? category.name_en ?? category.name_uk : category.name_uk;
             const categoryNote = lang === "en" ? category.note_en : category.note_uk;
-            const categoryItems = items.filter((i) => i.category_id === category.id).sort(bySortOrder);
+            const isNewCat = isNewSection(category.name_uk);
+            // «Новинки» also lists the flagged items of other categories, among its own, in the shared order.
+            const categoryItems = isNewCat
+              ? newSectionItems(categories, items, category.id)
+              : items.filter((i) => i.category_id === category.id).sort(bySortOrder);
 
             return (
               <section key={category.id}>
@@ -154,6 +167,8 @@ export default function MenuManager({
                     {categoryItems.map((item, itemIndex) => {
                       const name = lang === "en" ? item.name_en ?? item.name_uk : item.name_uk;
                       const description = lang === "en" ? item.description_en : item.description_uk;
+                      const isCopy = item.category_id !== category.id;
+                      const homeName = categories.find((c) => c.id === item.category_id)?.name_uk ?? "";
                       return (
                         <div
                           key={item.id}
@@ -185,10 +200,16 @@ export default function MenuManager({
                                   {item.promo_label}
                                 </span>
                               )}
-                                              {item.show_in_new && (
+                                              {isCopy ? (
                                 <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-sky-100 text-sky-900 shrink-0">
-                                  {lang === "uk" ? "★ у Новинках" : "★ in New"}
+                                  {lang === "uk" ? `з категорії «${homeName}»` : `from “${homeName}”`}
                                 </span>
+                              ) : (
+                                item.show_in_new && (
+                                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-sky-100 text-sky-900 shrink-0">
+                                    {lang === "uk" ? "★ у Новинках" : "★ in New"}
+                                  </span>
+                                )
                               )}
                               {!item.is_active && (
                                 <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-stone-200 text-stone-500 shrink-0">
@@ -210,33 +231,31 @@ export default function MenuManager({
                           </div>
                           <div className="flex gap-1 shrink-0 items-center">
                             <ArrowButtons
-                              onUp={() => moveItem(item.id, -1)}
-                              onDown={() => moveItem(item.id, 1)}
+                              onUp={() => moveItem(item.id, -1, isNewCat)}
+                              onDown={() => moveItem(item.id, 1, isNewCat)}
                               first={itemIndex === 0}
                               last={itemIndex === categoryItems.length - 1}
                               lang={lang}
                             />
                             <button
-                              onClick={() => setEditingItem({ item, categoryId: category.id })}
+                              onClick={() => setEditingItem({ item, categoryId: item.category_id })}
                               className="text-[12px] text-stone-500 hover:text-stone-900 px-2 py-1"
                             >
                               {t.editItem}
                             </button>
-                            <button
-                              onClick={() => handleDeleteItem(item.id)}
-                              className="text-[12px] text-red-500 hover:text-red-700 px-2 py-1"
-                            >
-                              {t.deleteItem}
-                            </button>
+                            {!isCopy && (
+                              <button
+                                onClick={() => handleDeleteItem(item.id)}
+                                className="text-[12px] text-red-500 hover:text-red-700 px-2 py-1"
+                              >
+                                {t.deleteItem}
+                              </button>
+                            )}
                           </div>
                         </div>
                       );
                     })}
                   </div>
-                )}
-
-                {isNewSection(category.name_uk) && (
-                  <ExtraNew items={items.filter((i) => i.show_in_new && i.is_active && i.category_id !== category.id)} categories={categories} lang={lang} />
                 )}
 
                 <button
@@ -290,17 +309,5 @@ function ArrowButtons({ onUp, onDown, first, last, lang }: { onUp: () => void; o
         ▼
       </button>
     </span>
-  );
-}
-
-// In the «Новинки» section: the items of other categories that are also shown there (flagged in their form).
-function ExtraNew({ items, categories, lang }: { items: MenuItem[]; categories: MenuCategory[]; lang: Lang }) {
-  if (items.length === 0) return null;
-  const home = (i: MenuItem) => categories.find((c) => c.id === i.category_id)?.name_uk ?? "";
-  return (
-    <p className="text-[12px] text-stone-500 bg-sky-50 border border-sky-100 rounded px-3 py-2 mb-2">
-      {lang === "uk" ? "Також показуються тут (зі своїх категорій): " : "Also shown here (from their own categories): "}
-      {items.map((i) => `${i.name_uk} (${home(i)})`).join(", ")}
-    </p>
   );
 }

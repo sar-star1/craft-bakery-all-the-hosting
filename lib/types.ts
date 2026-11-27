@@ -191,6 +191,8 @@ export interface MenuItem {
   is_active: boolean;
   // Also listed in the «Новинки» section of the menu while staying in its own category.
   show_in_new?: boolean;
+  // Position among the «Новинки» entries when this item is shown there as a copy (null = not placed yet, goes last).
+  new_sort_order?: number | null;
   sort_order: number;
   created_at: string;
   updated_at: string;
