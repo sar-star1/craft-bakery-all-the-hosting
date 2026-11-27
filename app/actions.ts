@@ -1,7 +1,8 @@
 "use server";
 
 import { after } from "next/server";
-import { moveWithin, nextSortOrder, type Sortable } from "@/lib/menuOrder";
+import { moveInNewSection, moveWithin, newSectionItems, nextSortOrder, type NewSectionRow, type Sortable } from "@/lib/menuOrder";
+import { isNewSection } from "@/lib/storefront";
 import { MAX_PHOTO_BYTES } from "@/lib/shrinkImage";
 import { revalidatePath } from "next/cache";
 import { createSeasonalOfferDrafts, type OfferSegment } from "@/lib/jobs";
@@ -294,6 +295,8 @@ export async function saveMenuItem(
     photo_url: photoUrl,
     is_active: isActive,
     show_in_new: formData.get("show_in_new") === "on",
+    // Un-flagging forgets the place in «Новинки»; a newly flagged item starts at the end.
+    ...(formData.get("show_in_new") === "on" ? {} : { new_sort_order: null }),
   };
 
   // A new item (or one moved to another category) goes to the end of its category, not onto position 0.
@@ -322,6 +325,22 @@ export async function moveMenuItem(id: string, dir: -1 | 1) {
   if (!item) return;
   const { data: rows } = await supabase.from("menu_items").select("id, sort_order, created_at").eq("category_id", item.category_id);
   await Promise.all(moveWithin((rows ?? []) as Sortable[], id, dir).map((u) => supabase.from("menu_items").update({ sort_order: u.sort_order }).eq("id", u.id)));
+  revalidatePath("/menu");
+  revalidatePath("/order");
+}
+
+// Moves an entry one place inside «Новинки», where an item's own and copied entries share one order.
+export async function moveNewSectionItem(id: string, dir: -1 | 1) {
+  await requireAdmin();
+  const supabase = createSupabaseServerClient();
+  const [{ data: cats }, { data: rows }] = await Promise.all([
+    supabase.from("menu_categories").select("id, name_uk, sort_order"),
+    supabase.from("menu_items").select("id, category_id, is_active, show_in_new, sort_order, new_sort_order, created_at"),
+  ]);
+  const newCat = (cats ?? []).find((c) => isNewSection(c.name_uk));
+  const list = newSectionItems(cats ?? [], (rows ?? []) as NewSectionRow[], newCat?.id);
+  const updates = moveInNewSection(list, newCat?.id, id, dir);
+  await Promise.all(updates.map((u) => supabase.from("menu_items").update({ [u.field]: u.value }).eq("id", u.id)));
   revalidatePath("/menu");
   revalidatePath("/order");
 }
